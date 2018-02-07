@@ -42,7 +42,6 @@ module atm_time_integration
    real (kind=RKIND), allocatable, dimension(:,:) :: delsq_theta, delsq_w, delsq_divergence
 !$acc declare create(delsq_theta, delsq_w, delsq_divergence)
    real (kind=RKIND), allocatable, dimension(:,:) :: delsq_u
-!   real (kind=RKIND), allocatable, dimension(:,:) :: delsq_circulation    ! no longer used -> removed 
    real (kind=RKIND), allocatable, dimension(:,:) :: delsq_vorticity
    real (kind=RKIND), allocatable, dimension(:,:) :: dpdz
 !$acc declare create(delsq_u,delsq_vorticity,dpdz)
@@ -214,7 +213,8 @@ module atm_time_integration
       real (kind=RKIND), dimension(:,:), pointer :: gpu_theta_m_1, gpu_theta_m_2, gpu_pressure_p, gpu_rtheta_p, gpu_exner
       real (kind=RKIND), dimension(:,:), pointer :: gpu_rtheta_pp, gpu_u_1, gpu_u_2, gpu_w_1, gpu_w_2
       real (kind=RKIND), dimension(:,:), pointer :: gpu_tend_u, gpu_ru_p, gpu_rw_p, gpu_rho_pp, gpu_pv_edge, gpu_rho_edge
-      real (kind=RKIND), dimension(:,:,:), pointer :: gpu_scalars_1
+      real (kind=RKIND), dimension(:,:,:), pointer :: gpu_scalars_1, gpu_scalars_2
+
 
 #ifdef MPAS_OPENACC
       integer :: rrpk_rank, rrpk_devices, rrpk_local_gpu_id
@@ -224,6 +224,7 @@ module atm_time_integration
       call acc_set_device_num(rrpk_local_gpu_id,acc_device_nvidia)
 #endif
 
+!!!!!!!!!!!!!!!gpu_halo code !!!!!!!!!!
       integer, dimension(:), pointer :: compactHaloInfo_c_v       ! Cells * Vertical levels
       integer, dimension(:), pointer :: compactHaloInfo_c_vP1     ! Cells * Vertical levels Plus 1
       integer, dimension(:), pointer :: compactHaloInfo_e_v       ! Edges * Vertical levels
@@ -258,15 +259,11 @@ module atm_time_integration
       !   as they have the correct dimensions.
       !
 !!!!!!!!!!!!!gpu halo exchange!!!!!!!!!!!!!
+!$acc data copyin(compactHaloInfo_c_v,compactHaloInfo_c_v_s,compactHaloInfo_e_v,compactHaloInfo_c_vP1)
       call mpas_pool_get_array_gpu(state,'theta_m',gpu_theta_m_1,1)
       call mpas_pool_get_array_gpu(state,'scalars',gpu_scalars_1,1)
       call mpas_pool_get_array_gpu(diag,'pressure_p',gpu_pressure_p)
       call mpas_pool_get_array_gpu(diag,'rtheta_p',gpu_rtheta_p)
-
-!      call mpas_pool_get_field(state, 'theta_m', theta_m_field, 1)
-!      call mpas_pool_get_field(state, 'scalars', scalars_field, 1)
-!      call mpas_pool_get_field(diag, 'pressure_p', pressure_p_field)
-!      call mpas_pool_get_field(diag, 'rtheta_p', rtheta_p_field)
 
       call mpas_pool_get_field(state, 'rho_zz', field_2d_ptr, 1)
       call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_c_v)
@@ -281,29 +278,12 @@ module atm_time_integration
       call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_e_v)
 
 
-!<<<<<<< HEAD
-!      call mpas_pool_get_array_gpu(state,'theta_m',gpu_theta_m_1,1)
-!      call mpas_pool_get_array_gpu(state,'scalars',gpu_scalars_1,1)
-!      call mpas_pool_get_array_gpu(diag,'pressure_p',gpu_pressure_p)
-!      call mpas_pool_get_array_gpu(diag,'rtheta_p',gpu_rtheta_p)
-!
-!      call mpas_pool_get_field(state, 'theta_m', theta_m_field, 1)
-!      call mpas_pool_get_field(state, 'scalars', scalars_field, 1)
-!      call mpas_pool_get_field(diag, 'pressure_p', pressure_p_field)
-!      call mpas_pool_get_field(diag, 'rtheta_p', rtheta_p_field)
-!=======
-!      call mpas_pool_get_field(state, 'rho_zz', field_2d_ptr, 1)
-!      call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_c_v)
-!
-!      call mpas_pool_get_field(state, 'w', field_2d_ptr, 1)
-!      call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_c_vP1)
-!
-!      call mpas_pool_get_field(state, 'scalars', field_3d_ptr, 1)
-!      call mpas_dmpar_compact_halo_info(field_3d_ptr, compactHaloInfo_c_v_s)
-!
-!      call mpas_pool_get_field(state, 'u', field_2d_ptr, 1)
-!      call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_e_v)
-!>>>>>>> gpu_halos
+!$acc data copyin(compactHaloInfo_c_v,compactHaloInfo_c_v_s,compactHaloInfo_e_v,compactHaloInfo_c_vP1)
+
+      call mpas_dmpar_exch_halo_acc(gpu_theta_m_1, compactHaloInfo_c_v)
+      call mpas_dmpar_exch_halo_acc(gpu_pressure_p, compactHaloInfo_c_v)
+      call mpas_dmpar_exch_halo_acc(gpu_scalars_1, compactHaloInfo_c_v_s)
+      call mpas_dmpar_exch_halo_acc(gpu_rtheta_p, compactHaloInfo_c_v)
 
       !
       ! allocate storage for physics tendency save
@@ -314,14 +294,9 @@ module atm_time_integration
       call mpas_pool_get_dimension(state, 'nVertices', nVertices)
 
       allocate(qtot(nVertLevels,nCells+1))
-!      qtot(:,nCells+1) = 0.0_RKIND
       allocate(tend_rtheta_physics(nVertLevels,nCells+1))
-!      tend_rtheta_physics(:,nCells+1) = 0.0_RKIND
       allocate(tend_rho_physics(nVertLevels,nCells+1))
-!      tend_rho_physics(:,nCells+1) = 0.0_RKIND
       allocate(tend_ru_physics(nVertLevels,nEdges+1))
-!      tend_ru_physics(:,nEdges+1) = 0.0_RKIND
-!!$acc update device(qtot,tend_rtheta_physics,tend_rho_physics,tend_ru_physics)
       !
       ! Initialize RK weights
       !
@@ -368,46 +343,6 @@ module atm_time_integration
         number_sub_steps(3) = number_of_sub_steps
 
       end if
-
-!!!!!!!!!!!!!!!!!!!gpu_halos code !!!!!!!!!!!!!!
-!$acc update host(gpu_theta_m_1,gpu_pressure_p,gpu_rtheta_p) 
-
-!<<<<<<< HEAD
-!!$acc update host(gpu_theta_m_1,gpu_pressure_p,gpu_rtheta_p) 
-!=======
-
-
-!>>>>>>> gpu_halos
-
-
-! theta_m
-      call mpas_pool_get_array(state, 'theta_m', theta_m, 1)
-      call mpas_dmpar_exch_halo_acc(theta_m, compactHaloInfo_c_v)
- 
-! scalars
-      call mpas_pool_get_array(state, 'scalars', scalars, 1)
-      call mpas_dmpar_exch_halo_acc(scalars, compactHaloInfo_c_v_s)
-
-! pressure_p
-      call mpas_pool_get_array(diag, 'pressure_p', pressure_p)
-      call mpas_dmpar_exch_halo_acc(pressure_p, compactHaloInfo_c_v)
-
-
-!!!!!!!!!!!!!!!!!!gpu_halos!!!!!!!!!!!!!!!
-!$acc update device(gpu_theta_m_1,gpu_pressure_p,gpu_rtheta_p)       
-! rtheta_p
-      call mpas_pool_get_array(diag, 'rtheta_p', rtheta_p)
-      call mpas_dmpar_exch_halo_acc(rtheta_p, compactHaloInfo_c_v)
-
-
-!<<<<<<< HEAD
-!      call mpas_dmpar_exch_halo_field(rtheta_p_field)
-!!!$acc update device(gpu_theta_m_1,gpu_scalars_1,gpu_pressure_p,gpu_rtheta_p)  
-!!$acc update device(gpu_theta_m_1,gpu_pressure_p,gpu_rtheta_p)       
-!=======
-!      call mpas_pool_get_array(diag, 'rtheta_p', rtheta_p)
-!      call mpas_dmpar_exch_halo_acc(rtheta_p, compactHaloInfo_c_v)
-!>>>>>>> gpu_halos
 
 
       call mpas_timer_start('atm_rk_integration_setup')
@@ -540,9 +475,7 @@ module atm_time_integration
                allocate(delsq_vorticity(nVertLevels,nVertices+1))
                allocate(dpdz(nVertLevels,nCells+1))
                allocate(ke_vertex(nVertLevels,nVertices+1))
-!               ke_vertex(:,nVertices+1) = 0.0_RKIND
                allocate(ke_edge(nVertLevels,nEdges+1))
-!               ke_edge(:,nEdges+1) = 0.0_RKIND
 
       DYNAMICS_SUBSTEPS : do dynamics_substep = 1, dynamics_split
 
@@ -586,24 +519,7 @@ module atm_time_integration
 
 !!!!!!!!!!!!!!!!!!!!!gpu_halos code !!!!!!!!!!!!!!
          call mpas_pool_get_array_gpu(diag,'exner',gpu_exner)
-         !$acc update host(gpu_exner)
-         call mpas_pool_get_array(diag, 'exner', exner)
-         call mpas_dmpar_exch_halo_acc(exner, compactHaloInfo_c_v)
-
-         !$acc update device(gpu_exner)
-
-
-!<<<<<<< HEAD
-!         call mpas_pool_get_array_gpu(diag,'exner',gpu_exner)
-!         !$acc update host(gpu_exner)
-!         call mpas_pool_get_field(diag, 'exner', exner_field)
-!         call mpas_dmpar_exch_halo_field(exner_field)
-!         !$acc update device(gpu_exner)
-!=======
-!
-!         call mpas_pool_get_array(diag, 'exner', exner)
-!         call mpas_dmpar_exch_halo_acc(exner, compactHaloInfo_c_v)
-!>>>>>>> gpu_halos
+         call mpas_dmpar_exch_halo_acc(gpu_exner, compactHaloInfo_c_v)
 
 
          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 
@@ -682,21 +598,6 @@ module atm_time_integration
                call mpas_pool_get_dimension(block % dimensions, 'edgeSolveThreadStart', edgeSolveThreadStart)
                call mpas_pool_get_dimension(block % dimensions, 'edgeSolveThreadEnd', edgeSolveThreadEnd)
 
-!               allocate(delsq_theta(nVertLevels,nCells+1))
-!               delsq_theta(:,nCells+1) = 0.0_RKIND
-!               allocate(delsq_w(nVertLevels,nCells+1))
-!               delsq_w(:,nCells+1) = 0.0_RKIND
-!!               allocate(qtot(nVertLevels,nCells+1))  ! initializing this earlier in solution sequence
-!               allocate(delsq_divergence(nVertLevels,nCells+1))
-!               delsq_divergence(:,nCells+1) = 0.0_RKIND
-!               allocate(delsq_u(nVertLevels,nEdges+1))
-!               delsq_u(:,nEdges+1) = 0.0_RKIND
-!!               allocate(delsq_circulation(nVertLevels,nVertices+1))  ! no longer used -> removed 
-!               allocate(delsq_vorticity(nVertLevels,nVertices+1))
-!               delsq_vorticity(:,nVertices+1) = 0.0_RKIND
-!               allocate(dpdz(nVertLevels,nCells+1))
-!               dpdz(:,nCells+1) = 0.0_RKIND
-!!$acc update device(delsq_theta,delsq_w,delsq_divergence,delsq_u,delsq_vorticity,dpdz)
 !$OMP PARALLEL DO
                do thread=1,nThreads
                   call atm_compute_dyn_tend( tend, tend_physics, state, diag, mesh, block % configs, nVertLevels, rk_step, dt, & 
@@ -749,24 +650,8 @@ module atm_time_integration
 
 !!!!!!!!!!!!!!!!!!!!gpu_halos code!!!!!!!!!!!!!
             call mpas_pool_get_array_gpu(tend,'u',gpu_tend_u)
-            !$acc update host(gpu_tend_u)
-            call mpas_pool_get_array(tend, 'u', tend_u)
-            call mpas_dmpar_exch_halo_acc(tend_u, compactHaloInfo_e_v, (/ 1 /))
-            !$acc update device(gpu_tend_u)   
+            call mpas_dmpar_exch_halo_acc(gpu_tend_u, compactHaloInfo_e_v, (/ 1 /))
 
-
-!<<<<<<< HEAD
-!            call mpas_pool_get_array_gpu(tend,'u',gpu_tend_u)
-!!$acc update host(gpu_tend_u)
-!            call mpas_pool_get_field(tend, 'u', tend_u_field)
-!            call mpas_dmpar_exch_halo_field(tend_u_field, (/ 1 /))
-!!$acc update device(gpu_tend_u)   
-!=======
-!
-!            call mpas_pool_get_array(tend, 'u', tend_u)
-!            call mpas_dmpar_exch_halo_acc(tend_u, compactHaloInfo_e_v, (/ 1 /))
-!   
-!>>>>>>> gpu_halos
 
             call mpas_timer_start('small_step_prep')
 
@@ -814,22 +699,7 @@ module atm_time_integration
 
 !!!!!!!!!!!!!!!!!!!!gpu_halos code !!!!!!!!!!!!!!!
                call mpas_pool_get_array_gpu(diag, 'rho_pp',gpu_rho_pp)
-               !$acc update host(gpu_rho_pp)
-               call mpas_pool_get_array(diag, 'rho_pp', rho_pp)
-               call mpas_dmpar_exch_halo_acc(rho_pp, compactHaloInfo_c_v, (/ 1 /))
-               !$acc update device(gpu_rho_pp)
-
-!<<<<<<< HEAD
-!               call mpas_pool_get_array_gpu(diag, 'rho_pp',gpu_rho_pp)
-!!$acc update host(gpu_rho_pp)
-!               call mpas_pool_get_field(diag, 'rho_pp', rho_pp_field)
-!               call mpas_dmpar_exch_halo_field(rho_pp_field, (/ 1 /))
-!!$acc update device(gpu_rho_pp)
-!=======
-!               call mpas_pool_get_array(diag, 'rho_pp', rho_pp)
-!               call mpas_dmpar_exch_halo_acc(rho_pp, compactHaloInfo_c_v, (/ 1 /))
-!
-!>>>>>>> gpu_halos
+               call mpas_dmpar_exch_halo_acc(gpu_rho_pp, compactHaloInfo_c_v, (/ 1 /))
 
 
                call mpas_timer_start('atm_advance_acoustic_step')
@@ -885,22 +755,7 @@ module atm_time_integration
 
 !!!!!!!!!!!!!gpu_halos code !!!!!!!!!!!!!!
                call mpas_pool_get_array_gpu(diag,'rtheta_pp',gpu_rtheta_pp)
-               !$acc update host(gpu_rtheta_pp)
-               call mpas_pool_get_array(diag, 'rtheta_pp', rtheta_pp)
-               call mpas_dmpar_exch_halo_acc(rtheta_pp, compactHaloInfo_c_v, (/ 1 /))
-               !$acc update device(gpu_rtheta_pp)
-
-
-!<<<<<<< HEAD
-!               call mpas_pool_get_array_gpu(diag,'rtheta_pp',gpu_rtheta_pp)
-!!$acc update host(gpu_rtheta_pp)
-!               call mpas_pool_get_field(diag, 'rtheta_pp', rtheta_pp_field)
-!               call mpas_dmpar_exch_halo_field(rtheta_pp_field, (/ 1 /))
-!!$acc update device(gpu_rtheta_pp)
-!=======
-!               call mpas_pool_get_array(diag, 'rtheta_pp', rtheta_pp)
-!               call mpas_dmpar_exch_halo_acc(rtheta_pp, compactHaloInfo_c_v, (/ 1 /))
-!>>>>>>> gpu_halos
+               call mpas_dmpar_exch_halo_acc(gpu_rtheta_pp, compactHaloInfo_c_v, (/ 1 /))
 
 
 !  complete update of horizontal momentum by including 3d divergence damping at
@@ -935,36 +790,19 @@ module atm_time_integration
 
 !!!!!!!!!!!!!!!gpu_halos code!!!!!!!!!!!!!!
             call mpas_pool_get_array_gpu(diag,'rw_p',gpu_rw_p)
+            call mpas_dmpar_exch_halo_acc(gpu_rw_p, compactHaloInfo_c_vP1)
+
             call mpas_pool_get_array_gpu(diag,'ru_p',gpu_ru_p)
-            !$acc update host(gpu_rw_p,gpu_ru_p,gpu_rho_pp,gpu_rtheta_pp)
-            call mpas_pool_get_array(diag, 'rw_p', rw_p)
-            call mpas_dmpar_exch_halo_acc(rw_p, compactHaloInfo_c_vP1)
+            call mpas_dmpar_exch_halo_acc(gpu_ru_p, compactHaloInfo_e_v)
 
-
-!<<<<<<< HEAD
-!            call mpas_pool_get_array_gpu(diag,'rw_p',gpu_rw_p)
-!            call mpas_pool_get_array_gpu(diag,'ru_p',gpu_ru_p)
-!!$acc update host(gpu_rw_p,gpu_ru_p,gpu_rho_pp,gpu_rtheta_pp)
-!            call mpas_pool_get_field(diag, 'rw_p', rw_p_field)
-!            call mpas_dmpar_exch_halo_field(rw_p_field)
-!=======
-!
-!            call mpas_pool_get_array(diag, 'rw_p', rw_p)
-!            call mpas_dmpar_exch_halo_acc(rw_p, compactHaloInfo_c_vP1)
-!>>>>>>> gpu_halos
-
-            !CR: SMALLER STENCIL?: call mpas_dmpar_exch_halo_field(block % diag % ru_p, (/ 2 /))
-            call mpas_pool_get_array(diag, 'ru_p', ru_p)
-            call mpas_dmpar_exch_halo_acc(ru_p, compactHaloInfo_e_v)
-
-            call mpas_pool_get_array(diag, 'rho_pp', rho_pp)
-            call mpas_dmpar_exch_halo_acc(rho_pp, compactHaloInfo_c_v)
+            call mpas_pool_get_array_gpu(diag, 'rho_pp',gpu_rho_pp)
+            call mpas_dmpar_exch_halo_acc(gpu_rho_pp, compactHaloInfo_c_v)
 
             ! the second layer of halo cells must be exchanged before calling atm_recover_large_step_variables
-            call mpas_pool_get_array(diag, 'rtheta_pp', rtheta_pp)
-            call mpas_dmpar_exch_halo_acc(rtheta_pp, compactHaloInfo_c_v, (/ 2 /))
+            call mpas_pool_get_array_gpu(diag,'rtheta_pp',gpu_rtheta_pp)
+            call mpas_dmpar_exch_halo_acc(gpu_rtheta_pp, compactHaloInfo_c_v, (/ 2 /))
 
-!$acc update device(gpu_rw_p,gpu_ru_p,gpu_rho_pp,gpu_rtheta_pp)
+
             call mpas_timer_start('atm_recover_large_step_variables')
             block => domain % blocklist
             do while (associated(block))
@@ -1014,22 +852,8 @@ module atm_time_integration
 
 !!!!!!!!!!!!!!!gpu_halos code!!!!!!!!!!!!!!
             call mpas_pool_get_array_gpu(state, 'u',gpu_u_2, 2)
-            !$acc update host(gpu_u_2)
-            call mpas_pool_get_array(state, 'u', u, 2)
-            call mpas_dmpar_exch_halo_acc(u, compactHaloInfo_e_v)
-            !$acc update device(gpu_u_2)
+            call mpas_dmpar_exch_halo_acc(gpu_u_2, compactHaloInfo_e_v)
 
-
-!<<<<<<< HEAD
-!            call mpas_pool_get_array_gpu(state, 'u',gpu_u_2, 2)
-!!$acc update host(gpu_u_2)
-!            call mpas_pool_get_field(state, 'u', u_field, 2)
-!            call mpas_dmpar_exch_halo_field(u_field)
-!!$acc update device(gpu_u_2)
-!=======
-!            call mpas_pool_get_array(state, 'u', u, 2)
-!            call mpas_dmpar_exch_halo_acc(u, compactHaloInfo_e_v)
-!>>>>>>> gpu_halos
 
             ! scalar advection: RK3 scheme of Skamarock and Gassmann (2011). 
             ! PD or monotonicity constraints applied only on the final Runge-Kutta substep.
@@ -1174,7 +998,6 @@ module atm_time_integration
                call mpas_pool_get_dimension(block % dimensions, 'edgeThreadStart', edgeThreadStart)
                call mpas_pool_get_dimension(block % dimensions, 'edgeThreadEnd', edgeThreadEnd)
 
-!!$acc update device(ke_vertex,ke_edge)   
 !$OMP PARALLEL DO
                do thread=1,nThreads
                   call atm_compute_solve_diagnostics_gpu(dt, state, 2, diag, mesh, block % configs, &
@@ -1195,61 +1018,25 @@ module atm_time_integration
 
 !!!!!!!!!!!!!!!!gpu_halos code !!!!!!!!!!!
             call mpas_pool_get_array_gpu(state, 'w', gpu_w_2, 2)
-            !$acc update host(gpu_w_2)
-            call mpas_pool_get_array(state, 'w', w, 2)
-            call mpas_dmpar_exch_halo_acc(w, compactHaloInfo_c_vP1)
+            call mpas_dmpar_exch_halo_acc(gpu_w_2, compactHaloInfo_c_vP1)
 
             ! pv_edge
             call mpas_pool_get_subpool(domain % blocklist % structs, 'diag', diag)
             call mpas_pool_get_array_gpu(diag, 'pv_edge', gpu_pv_edge)
-            !$acc update host(gpu_pv_edge)
-            call mpas_pool_get_array(diag, 'pv_edge', pv_edge)
-            call mpas_dmpar_exch_halo_acc(pv_edge, compactHaloInfo_e_v)
+            call mpas_dmpar_exch_halo_acc(gpu_pv_edge, compactHaloInfo_e_v)
 
             ! rho_edge
             call mpas_pool_get_array_gpu(diag, 'rho_edge', gpu_rho_edge)
-            !$acc update host(gpu_rho_edge)
-            call mpas_pool_get_array(diag, 'rho_edge', rho_edge)
-            call mpas_dmpar_exch_halo_acc(rho_edge, compactHaloInfo_e_v)
+            call mpas_dmpar_exch_halo_acc(gpu_rho_edge, compactHaloInfo_e_v)
 
-
-!<<<<<<< HEAD
-!            call mpas_pool_get_array_gpu(state, 'w', gpu_w_2, 2)
-!!$acc update host(gpu_w_2)
-!            call mpas_pool_get_field(state, 'w', w_field, 2)
-!            call mpas_dmpar_exch_halo_field(w_field)
-!
-!            ! pv_edge
-!            call mpas_pool_get_subpool(domain % blocklist % structs, 'diag', diag)
-!            call mpas_pool_get_array_gpu(diag, 'pv_edge', gpu_pv_edge)
-!!$acc update host(gpu_pv_edge)
-!            call mpas_pool_get_field(diag, 'pv_edge', pv_edge_field)
-!            call mpas_dmpar_exch_halo_field(pv_edge_field)
-!
-!            ! rho_edge
-!            call mpas_pool_get_array_gpu(diag, 'rho_edge', gpu_rho_edge)
-!!$acc update host(gpu_rho_edge)
-!            call mpas_pool_get_field(diag, 'rho_edge', rho_edge_field)
-!            call mpas_dmpar_exch_halo_field(rho_edge_field)
-!=======
-!            call mpas_pool_get_array(state, 'w', w, 2)
-!            call mpas_dmpar_exch_halo_acc(w, compactHaloInfo_c_vP1)
-!
-!            ! pv_edge
-!            call mpas_pool_get_subpool(domain % blocklist % structs, 'diag', diag)
-!            call mpas_pool_get_array(diag, 'pv_edge', pv_edge)
-!            call mpas_dmpar_exch_halo_acc(pv_edge, compactHaloInfo_e_v)
-!
-!            ! rho_edge
-!            call mpas_pool_get_array(diag, 'rho_edge', rho_edge)
-!            call mpas_dmpar_exch_halo_acc(rho_edge, compactHaloInfo_e_v)
-!>>>>>>> gpu_halos
-
-!$acc update device(gpu_w_2,gpu_pv_edge,gpu_rho_edge)
             ! scalars
             if (config_scalar_advection .and. (.not. config_split_dynamics_transport) ) then
-               call mpas_pool_get_array(state, 'scalars', scalars, 2)
-               call mpas_dmpar_exch_halo_acc(scalars, compactHaloInfo_c_v_s)
+
+               call mpas_pool_get_array_gpu(state, 'scalars', gpu_scalars_2, 2)
+               call mpas_dmpar_exch_halo_acc(gpu_scalars_2, compactHaloInfo_c_v_s)
+
+!               call mpas_pool_get_array(state, 'scalars', scalars, 2)
+!               call mpas_dmpar_exch_halo_acc(scalars, compactHaloInfo_c_v_s)
             end if
 
          end do RK3_DYNAMICS
@@ -1259,28 +1046,14 @@ module atm_time_integration
 
 !!!!!!!!!!!!!!!gpu_halos code!!!!!!!!!!!!
 
-            call mpas_pool_get_array(state, 'theta_m', theta_m, 2)
             call mpas_pool_get_array_gpu(state, 'theta_m', gpu_theta_m_2, 2)
-            !$acc update host(gpu_theta_m_2,gpu_pressure_p,gpu_rtheta_p)
-            call mpas_dmpar_exch_halo_acc(theta_m, compactHaloInfo_c_v)
-            call mpas_dmpar_exch_halo_acc(pressure_p, compactHaloInfo_c_v)
-            call mpas_dmpar_exch_halo_acc(rtheta_p, compactHaloInfo_c_v)
-            !$acc update device(gpu_theta_m_2,gpu_pressure_p,gpu_rtheta_p)
+            call mpas_dmpar_exch_halo_acc(gpu_theta_m_2, compactHaloInfo_c_v)
 
-!<<<<<<< HEAD
-!            call mpas_pool_get_field(state, 'theta_m', theta_m_field, 2)
-!            call mpas_pool_get_array_gpu(state, 'theta_m', gpu_theta_m_2, 2)
-!!$acc update host(gpu_theta_m_2,gpu_pressure_p,gpu_rtheta_p)
-!            call mpas_dmpar_exch_halo_field(theta_m_field)
-!            call mpas_dmpar_exch_halo_field(pressure_p_field)
-!            call mpas_dmpar_exch_halo_field(rtheta_p_field)
-!!$acc update device(gpu_theta_m_2,gpu_pressure_p,gpu_rtheta_p)
-!=======
-!            call mpas_pool_get_array(state, 'theta_m', theta_m, 2)
-!            call mpas_dmpar_exch_halo_acc(theta_m, compactHaloInfo_c_v)
-!            call mpas_dmpar_exch_halo_acc(pressure_p, compactHaloInfo_c_v)
-!            call mpas_dmpar_exch_halo_acc(rtheta_p, compactHaloInfo_c_v)
-!>>>>>>> gpu_halos
+            call mpas_pool_get_array_gpu(diag, 'pressure_p', gpu_pressure_p)
+            call mpas_dmpar_exch_halo_acc(gpu_pressure_p, compactHaloInfo_c_v)
+
+            call mpas_pool_get_array_gpu(diag, 'rtheta_p', gpu_rtheta_p)
+            call mpas_dmpar_exch_halo_acc(gpu_rtheta_p, compactHaloInfo_c_v)
 
             !
             ! Note: A halo exchange for 'exner' here as well as after the call
@@ -1341,10 +1114,8 @@ module atm_time_integration
                deallocate(ke_edge)
                deallocate(delsq_theta)
                deallocate(delsq_w)
-!!               deallocate(qtot)  ! deallocation after dynamics step complete, see below
                deallocate(delsq_divergence)
                deallocate(delsq_u)
-!!               deallocate(delsq_circulation)    ! no longer used -> removed 
                deallocate(delsq_vorticity)
                deallocate(dpdz)
 
@@ -1492,8 +1263,9 @@ module atm_time_integration
             end if
 
             if (rk_step < 3) then
-               call mpas_pool_get_array(state, 'scalars', scalars, 2)
-               call mpas_dmpar_exch_halo_acc(scalars, compactHaloInfo_c_v_s)
+               call mpas_pool_get_array_gpu(state, 'scalars', gpu_scalars_2, 2)
+               call mpas_dmpar_exch_halo_acc(gpu_scalars_2, compactHaloInfo_c_v_s)
+
             end if
 
          end do RK3_SPLIT_TRANSPORT
@@ -1511,8 +1283,6 @@ module atm_time_integration
          call mpas_pool_get_subpool(block % structs, 'mesh', mesh)
 
          call mpas_pool_get_array_gpu(state, 'u', u, 2)
-!         call mpas_pool_get_array_gpu(state, 'u', gpu_u_2, 2)
-!!$acc update host(gpu_u_2)
          call mpas_pool_get_array_gpu(diag, 'uReconstructX', uReconstructX)
          call mpas_pool_get_array_gpu(diag, 'uReconstructY', uReconstructY)
          call mpas_pool_get_array_gpu(diag, 'uReconstructZ', uReconstructZ)
