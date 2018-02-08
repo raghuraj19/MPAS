@@ -279,7 +279,7 @@ module atm_time_integration
       call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_e_v)
 
 
-!$acc enter data copyin(compactHaloInfo_c_v,compactHaloInfo_c_v_s,compactHaloInfo_e_v,compactHaloInfo_c_vP1)
+!!$acc enter data copyin(compactHaloInfo_c_v,compactHaloInfo_c_v_s,compactHaloInfo_e_v,compactHaloInfo_c_vP1)
 
       call mpas_dmpar_exch_halo_acc(gpu_theta_m_1, compactHaloInfo_c_v)
       call mpas_dmpar_exch_halo_acc(gpu_pressure_p, compactHaloInfo_c_v)
@@ -1369,7 +1369,7 @@ module atm_time_integration
       !
 #endif
 
-!$acc exit data
+!!$acc exit data
       deallocate(compactHaloInfo_c_v)
       deallocate(compactHaloInfo_c_vP1)
       deallocate(compactHaloInfo_c_v_s)

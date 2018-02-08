@@ -5072,6 +5072,9 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
          end do
       end do
 
+      !$acc enter data copyin(compactHaloInfo)
+      !!$acc update device(compactHaloInfo)
+
       deallocate(recvEndpoints)
 
    end subroutine mpas_dmpar_compact_halo_info_2d_real !}}}
