@@ -215,6 +215,13 @@ module atm_time_integration
       real (kind=RKIND), dimension(:,:), pointer :: gpu_tend_u, gpu_ru_p, gpu_rw_p, gpu_rho_pp, gpu_pv_edge, gpu_rho_edge
       real (kind=RKIND), dimension(:,:,:), pointer :: gpu_scalars_1, gpu_scalars_2
 
+!!!!!!!!!!!!!!!gpu_halo code !!!!!!!!!!
+      integer, dimension(:), pointer :: compactHaloInfo_c_v       ! Cells * Vertical levels
+      integer, dimension(:), pointer :: compactHaloInfo_c_vP1     ! Cells * Vertical levels Plus 1
+      integer, dimension(:), pointer :: compactHaloInfo_e_v       ! Edges * Vertical levels
+      integer, dimension(:), pointer :: compactHaloInfo_c_v_s     ! Cells * Vertical levels * Scalars
+
+
 
 #ifdef MPAS_OPENACC
       integer :: rrpk_rank, rrpk_devices, rrpk_local_gpu_id
@@ -223,12 +230,6 @@ module atm_time_integration
       rrpk_local_gpu_id = mod(rrpk_rank,rrpk_devices)
       call acc_set_device_num(rrpk_local_gpu_id,acc_device_nvidia)
 #endif
-
-!!!!!!!!!!!!!!!gpu_halo code !!!!!!!!!!
-      integer, dimension(:), pointer :: compactHaloInfo_c_v       ! Cells * Vertical levels
-      integer, dimension(:), pointer :: compactHaloInfo_c_vP1     ! Cells * Vertical levels Plus 1
-      integer, dimension(:), pointer :: compactHaloInfo_e_v       ! Edges * Vertical levels
-      integer, dimension(:), pointer :: compactHaloInfo_c_v_s     ! Cells * Vertical levels * Scalars
 
 
       !
@@ -259,7 +260,7 @@ module atm_time_integration
       !   as they have the correct dimensions.
       !
 !!!!!!!!!!!!!gpu halo exchange!!!!!!!!!!!!!
-!$acc data copyin(compactHaloInfo_c_v,compactHaloInfo_c_v_s,compactHaloInfo_e_v,compactHaloInfo_c_vP1)
+!!$acc enter data copyin(compactHaloInfo_c_v,compactHaloInfo_c_v_s,compactHaloInfo_e_v,compactHaloInfo_c_vP1)
       call mpas_pool_get_array_gpu(state,'theta_m',gpu_theta_m_1,1)
       call mpas_pool_get_array_gpu(state,'scalars',gpu_scalars_1,1)
       call mpas_pool_get_array_gpu(diag,'pressure_p',gpu_pressure_p)
@@ -278,7 +279,7 @@ module atm_time_integration
       call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_e_v)
 
 
-!$acc data copyin(compactHaloInfo_c_v,compactHaloInfo_c_v_s,compactHaloInfo_e_v,compactHaloInfo_c_vP1)
+!$acc enter data copyin(compactHaloInfo_c_v,compactHaloInfo_c_v_s,compactHaloInfo_e_v,compactHaloInfo_c_vP1)
 
       call mpas_dmpar_exch_halo_acc(gpu_theta_m_1, compactHaloInfo_c_v)
       call mpas_dmpar_exch_halo_acc(gpu_pressure_p, compactHaloInfo_c_v)
@@ -1368,6 +1369,7 @@ module atm_time_integration
       !
 #endif
 
+!$acc exit data
       deallocate(compactHaloInfo_c_v)
       deallocate(compactHaloInfo_c_vP1)
       deallocate(compactHaloInfo_c_v_s)
