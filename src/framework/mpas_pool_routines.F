@@ -4271,7 +4271,6 @@ module mpas_pool_routines
       if (associated(field)) then
       scalar => field % scalar
       !$acc enter data copyin(field%scalar)
-      !$acc update device(field%scalar)
       endif
 
    end subroutine mpas_pool_get_array_0d_real_gpu!}}}
@@ -4324,7 +4323,6 @@ module mpas_pool_routines
       if (associated(field)) then
       array => field % array
       !$acc enter data copyin(field%array)
-      !$acc update device(field%array)
       endif
 
    end subroutine mpas_pool_get_array_1d_real_gpu!}}}
@@ -4377,7 +4375,6 @@ module mpas_pool_routines
       if (associated(field)) then
       array => field % array
       !$acc enter data copyin(field%array)
-      !$acc update device(field%array)
       endif
 
    end subroutine mpas_pool_get_array_2d_real_gpu!}}}
@@ -4431,7 +4428,6 @@ module mpas_pool_routines
       if (associated(field)) then
       array => field % array
       !$acc enter data copyin(field%array)
-      !$acc update device(field%array)
       endif
 
    end subroutine mpas_pool_get_array_3d_real_gpu!}}}
@@ -4483,7 +4479,6 @@ module mpas_pool_routines
       if (associated(field)) then
       array => field % array
       !$acc enter data copyin(field%array)
-      !$acc update device(field%array)
       endif
 
    end subroutine mpas_pool_get_array_4d_real_gpu!}}}
@@ -4536,7 +4531,6 @@ module mpas_pool_routines
       if (associated(field)) then
       array => field % array
       !$acc enter data copyin(field%array)
-      !$acc update device(field%array)
       endif
 
    end subroutine mpas_pool_get_array_5d_real_gpu!}}}
@@ -4589,7 +4583,6 @@ module mpas_pool_routines
       if (associated(field)) then
       scalar => field % scalar
       !$acc enter data copyin(field%scalar)
-      !$acc update device(field%scalar)
       endif
 
    end subroutine mpas_pool_get_array_0d_int_gpu!}}}
@@ -4642,7 +4635,6 @@ module mpas_pool_routines
       if (associated(field)) then
       array => field % array
       !$acc enter data copyin(field%array)
-      !$acc update device(field%array)
       endif
 
    end subroutine mpas_pool_get_array_1d_int_gpu!}}}
@@ -4695,7 +4687,6 @@ module mpas_pool_routines
       if (associated(field)) then
       array => field % array
       !$acc enter data copyin(field%array)
-      !$acc update device(field%array)
       endif
 
    end subroutine mpas_pool_get_array_2d_int_gpu!}}}
@@ -4748,7 +4739,6 @@ module mpas_pool_routines
       if (associated(field)) then
       array => field % array
       !$acc enter data copyin(field%array)
-      !$acc update device(field%array)
       endif
 
    end subroutine mpas_pool_get_array_3d_int_gpu!}}}
@@ -4801,7 +4791,6 @@ module mpas_pool_routines
       if (associated(field)) then
       string => field % scalar
       !$acc enter data copyin(field%scalar)
-      !$acc update device(field%scalar)
       endif
 
    end subroutine mpas_pool_get_array_0d_char_gpu!}}}
@@ -4854,7 +4843,6 @@ module mpas_pool_routines
       if (associated(field)) then
       array => field % array
       !$acc enter data copyin(field%array)
-      !$acc update device(field%array)
       endif
 
    end subroutine mpas_pool_get_array_1d_char_gpu!}}}
