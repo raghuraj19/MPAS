@@ -26,11 +26,7 @@ module atm_time_integration
 #endif
 
    use mpas_atm_iau  
-
-#ifdef MPAS_OPENACC
    use openacc
-#endif
-
    integer :: timerid, secs, u_secs
 
    ! Used to store physics tendencies for dynamics variables
@@ -114,7 +110,7 @@ module atm_time_integration
       block => domain % blocklist
       do while (associated(block))
          call mpas_pool_get_subpool(block % structs, 'state', state)
-         call mpas_pool_get_array_gpu(state, 'xtime', xtime, 2)
+         call mpas_pool_get_array(state, 'xtime', xtime, 2)
          xtime = xtime_new
          block => block % next
       end do
@@ -201,6 +197,21 @@ module atm_time_integration
 
       type (field2DReal), pointer :: field_2d_ptr
       type (field3DReal), pointer :: field_3d_ptr
+      type (field2DReal), pointer :: theta_m_field
+      type (field3DReal), pointer :: scalars_field
+      type (field2DReal), pointer :: pressure_p_field
+      type (field2DReal), pointer :: rtheta_p_field
+      type (field2DReal), pointer :: rtheta_pp_field
+
+      type (field2DReal), pointer :: tend_u_field
+      type (field2DReal), pointer :: u_field
+      type (field2DReal), pointer :: w_field
+      type (field2DReal), pointer :: rw_p_field
+      type (field2DReal), pointer :: ru_p_field
+      type (field2DReal), pointer :: rho_pp_field
+      type (field2DReal), pointer :: pv_edge_field
+      type (field2DReal), pointer :: rho_edge_field
+      type (field2DReal), pointer :: exner_field
 
       real (kind=RKIND), dimension(:,:), pointer :: w
       real (kind=RKIND), dimension(:,:), pointer :: u, uReconstructZonal, uReconstructMeridional, uReconstructX, uReconstructY, uReconstructZ
@@ -222,14 +233,11 @@ module atm_time_integration
       integer, dimension(:), pointer :: compactHaloInfo_c_v_s     ! Cells * Vertical levels * Scalars
 
 
-
-#ifdef MPAS_OPENACC
       integer :: rrpk_rank, rrpk_devices, rrpk_local_gpu_id
       rrpk_rank = domain % dminfo % my_proc_id
       rrpk_devices =  acc_get_num_devices(acc_device_nvidia)
       rrpk_local_gpu_id = mod(rrpk_rank,rrpk_devices)
       call acc_set_device_num(rrpk_local_gpu_id,acc_device_nvidia)
-#endif
 
 
       !
@@ -260,10 +268,6 @@ module atm_time_integration
       !   as they have the correct dimensions.
       !
 !!!!!!!!!!!!!gpu halo exchange!!!!!!!!!!!!!
-      call mpas_pool_get_array_gpu(state,'theta_m',gpu_theta_m_1,1)
-      call mpas_pool_get_array_gpu(state,'scalars',gpu_scalars_1,1)
-      call mpas_pool_get_array_gpu(diag,'pressure_p',gpu_pressure_p)
-      call mpas_pool_get_array_gpu(diag,'rtheta_p',gpu_rtheta_p)
 
       call mpas_pool_get_field(state, 'rho_zz', field_2d_ptr, 1)
       call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_c_v)
@@ -276,13 +280,6 @@ module atm_time_integration
 
       call mpas_pool_get_field(state, 'u', field_2d_ptr, 1)
       call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_e_v)
-
-
-
-      call mpas_dmpar_exch_halo_acc(gpu_theta_m_1, compactHaloInfo_c_v)
-      call mpas_dmpar_exch_halo_acc(gpu_pressure_p, compactHaloInfo_c_v)
-      call mpas_dmpar_exch_halo_acc(gpu_scalars_1, compactHaloInfo_c_v_s)
-      call mpas_dmpar_exch_halo_acc(gpu_rtheta_p, compactHaloInfo_c_v)
 
       !
       ! allocate storage for physics tendency save
@@ -343,6 +340,16 @@ module atm_time_integration
 
       end if
 
+      call mpas_pool_get_array_gpu(state,'theta_m',gpu_theta_m_1,1)
+      call mpas_pool_get_array_gpu(state,'scalars',gpu_scalars_1,1)
+      call mpas_pool_get_array_gpu(diag,'pressure_p',gpu_pressure_p)
+      call mpas_pool_get_array_gpu(diag,'rtheta_p',gpu_rtheta_p)
+
+
+      call mpas_dmpar_exch_halo_acc(gpu_theta_m_1, compactHaloInfo_c_v)
+      call mpas_dmpar_exch_halo_acc(gpu_pressure_p, compactHaloInfo_c_v)
+      call mpas_dmpar_exch_halo_acc(gpu_scalars_1, compactHaloInfo_c_v_s)
+      call mpas_dmpar_exch_halo_acc(gpu_rtheta_p, compactHaloInfo_c_v)
 
       call mpas_timer_start('atm_rk_integration_setup')
 
@@ -597,6 +604,13 @@ module atm_time_integration
                call mpas_pool_get_dimension(block % dimensions, 'edgeSolveThreadStart', edgeSolveThreadStart)
                call mpas_pool_get_dimension(block % dimensions, 'edgeSolveThreadEnd', edgeSolveThreadEnd)
 
+              delsq_theta(:,nCells+1) = 0.0_RKIND
+              delsq_w(:,nCells+1) = 0.0_RKIND
+              delsq_divergence(:,nCells+1) = 0.0_RKIND
+              delsq_u(:,nEdges+1) = 0.0_RKIND
+              delsq_vorticity(:,nVertices+1) = 0.0_RKIND
+              dpdz(:,nCells+1) = 0.0_RKIND
+
 !$OMP PARALLEL DO
                do thread=1,nThreads
                   call atm_compute_dyn_tend( tend, tend_physics, state, diag, mesh, block % configs, nVertLevels, rk_step, dt, & 
@@ -760,27 +774,27 @@ module atm_time_integration
 !  complete update of horizontal momentum by including 3d divergence damping at
 !  the end of the acoustic step
 
-               call mpas_timer_start('atm_divergence_damping_3d')
-               block => domain % blocklist
-               do while (associated(block))
-                  call mpas_pool_get_subpool(block % structs, 'mesh', mesh)
-                  call mpas_pool_get_subpool(block % structs, 'state', state)
-                  call mpas_pool_get_subpool(block % structs, 'diag', diag)
+!               call mpas_timer_start('atm_divergence_damping_3d')
+!               block => domain % blocklist
+!               do while (associated(block))
+!                  call mpas_pool_get_subpool(block % structs, 'mesh', mesh)
+!                  call mpas_pool_get_subpool(block % structs, 'state', state)
+!                  call mpas_pool_get_subpool(block % structs, 'diag', diag)
 
-                  call mpas_pool_get_dimension(block % dimensions, 'nThreads', nThreads)
-                  call mpas_pool_get_dimension(block % dimensions, 'edgeThreadStart', edgeThreadStart)
-                  call mpas_pool_get_dimension(block % dimensions, 'edgeThreadEnd', edgeThreadEnd)
+!                  call mpas_pool_get_dimension(block % dimensions, 'nThreads', nThreads)
+!                  call mpas_pool_get_dimension(block % dimensions, 'edgeThreadStart', edgeThreadStart)
+!                  call mpas_pool_get_dimension(block % dimensions, 'edgeThreadEnd', edgeThreadEnd)
 
-!$OMP PARALLEL DO
-                  do thread=1,nThreads
-                     call atm_divergence_damping_3d( state, diag, mesh, block % configs, rk_sub_timestep(rk_step), &
-                                                     edgeThreadStart(thread), edgeThreadEnd(thread) )
-                  end do
-!$OMP END PARALLEL DO
+!!$OMP PARALLEL DO
+!                  do thread=1,nThreads
+!                     call atm_divergence_damping_3d( state, diag, mesh, block % configs, rk_sub_timestep(rk_step), &
+!                                                     edgeThreadStart(thread), edgeThreadEnd(thread) )
+!                  end do
+!!$OMP END PARALLEL DO
 
-                  block => block % next
-               end do
-               call mpas_timer_stop('atm_divergence_damping_3d')
+!                  block => block % next
+!               end do
+!               call mpas_timer_stop('atm_divergence_damping_3d')
 
 
 !  complete update of horizontal momentum by including 3d divergence damping at
@@ -1754,10 +1768,10 @@ module atm_time_integration
       real (kind=RKIND) :: dtseps, c2, qtotal, rcv
       real (kind=RKIND), dimension( nVertLevels ,nCells+1) :: b_tri, c_tri
 
+!$acc declare create(b_tri,c_tri)
 !$acc data present(cofrz, gamma_tri, a_tri, alpha_tri, &
 !$acc coftz, cofwr, cofwt, cofwz, &
-!$acc rdzw, cqw, fzm, fzp, p, pb, qtot, rb, rdzu, rt, rtb, t, zz)&
-!$acc create(b_tri,c_tri)
+!$acc rdzw, cqw, fzm, fzp, p, pb, qtot, rb, rdzu, rt, rtb, t, zz)
   
       !  set coefficients
       dtseps = .5*dts*(1.+epssm)
@@ -7396,10 +7410,14 @@ if (config_horiz_mixing == "2d_smagorinsky") then
                 enddo
          enddo
 !$acc end parallel
-!$acc update host(u_2,w_2)
       end if
 
 !$acc end data
+
+!$acc update host(ru_save, rw_save, &
+!$acc rtheta_p_save,rho_p_save, &
+!$acc ruAvg,ruAvg_split, wwAvg, wwAvg_split, &
+!$acc u_1,w_1,w_2,theta_m_1,rho_zz_1)
 
    end subroutine atm_rk_dynamics_substep_finish_work
    subroutine summarize_timestep(domain)
@@ -7457,14 +7475,14 @@ if (config_horiz_mixing == "2d_smagorinsky") then
             call mpas_pool_get_subpool(block % structs, 'diag', diag)
             call mpas_pool_get_subpool(block % structs, 'mesh', mesh)
 
-            call mpas_pool_get_array_gpu(state, 'w', w, 2)
-            call mpas_pool_get_array_gpu(state, 'u', u, 2)
-            call mpas_pool_get_array_gpu(diag, 'v', v)
-            call mpas_pool_get_array_gpu(mesh, 'indexToCellID', indexToCellID)
-            call mpas_pool_get_array_gpu(mesh, 'latCell', latCell)
-            call mpas_pool_get_array_gpu(mesh, 'lonCell', lonCell)
-            call mpas_pool_get_array_gpu(mesh, 'latEdge', latEdge)
-            call mpas_pool_get_array_gpu(mesh, 'lonEdge', lonEdge)
+            call mpas_pool_get_array(state, 'w', w, 2)
+            call mpas_pool_get_array(state, 'u', u, 2)
+            call mpas_pool_get_array(diag, 'v', v)
+            call mpas_pool_get_array(mesh, 'indexToCellID', indexToCellID)
+            call mpas_pool_get_array(mesh, 'latCell', latCell)
+            call mpas_pool_get_array(mesh, 'lonCell', lonCell)
+            call mpas_pool_get_array(mesh, 'latEdge', latEdge)
+            call mpas_pool_get_array(mesh, 'lonEdge', lonEdge)
             call mpas_pool_get_dimension(state, 'nCellsSolve', nCellsSolve)
             call mpas_pool_get_dimension(state, 'nEdgesSolve', nEdgesSolve)
             call mpas_pool_get_dimension(state, 'nVertLevels', nVertLevels)
@@ -7678,8 +7696,8 @@ if (config_horiz_mixing == "2d_smagorinsky") then
          do while (associated(block))
             call mpas_pool_get_subpool(block % structs, 'state', state)
 
-            call mpas_pool_get_array_gpu(state, 'w', w, 2)
-            call mpas_pool_get_array_gpu(state, 'u', u, 2)
+            call mpas_pool_get_array(state, 'w', w, 2)
+            call mpas_pool_get_array(state, 'u', u, 2)
             call mpas_pool_get_dimension(state, 'nCellsSolve', nCellsSolve)
             call mpas_pool_get_dimension(state, 'nEdgesSolve', nEdgesSolve)
             call mpas_pool_get_dimension(state, 'nVertLevels', nVertLevels)
@@ -7721,7 +7739,7 @@ if (config_horiz_mixing == "2d_smagorinsky") then
          do while (associated(block))
             call mpas_pool_get_subpool(block % structs, 'state', state)
 
-            call mpas_pool_get_array_gpu(state, 'scalars', scalars, 2)
+            call mpas_pool_get_array(state, 'scalars', scalars, 2)
             call mpas_pool_get_dimension(state, 'nCellsSolve', nCellsSolve)
             call mpas_pool_get_dimension(state, 'nVertLevels', nVertLevels)
             call mpas_pool_get_dimension(state, 'num_scalars', num_scalars)
