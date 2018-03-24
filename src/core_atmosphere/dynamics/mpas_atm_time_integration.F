@@ -62,8 +62,77 @@ module atm_time_integration
    real (kind=RKIND), allocatable, dimension(:,:) :: ke_edge
 !$acc declare create(ke_vertex,ke_edge)
 
+   ! Compacted information about halo exchange communication; used by OpenACC-enabled halo exchange routines
+   integer, dimension(:), pointer :: compactHaloInfo_c_v       ! Cells * Vertical levels
+   integer, dimension(:), pointer :: compactHaloInfo_c_vP1     ! Cells * Vertical levels Plus 1
+   integer, dimension(:), pointer :: compactHaloInfo_e_v       ! Edges * Vertical levels
+   integer, dimension(:), pointer :: compactHaloInfo_c_v_s     ! Cells * Vertical levels * Scalars
       
    contains
+ !-----------------------------------------------------------------------
+    !  routine MPAS_atm_dynamics_init
+    !
+    !> \brief Initialize the dynamics component
+    !> \author Michael Duda
+    !> \date   23 March 2018
+    !> \details
+    !>  Prepare the dynamics component of MPAS-Atmosphere for time integration.
+    !>  This may involve allocating dynamics-local storage, and setting up
+    !>  OpenACC-optimized communication structures.
+    !
+    !-----------------------------------------------------------------------
+    subroutine mpas_atm_dynamics_init(domain)
+ 
+       implicit none
+ 
+       type (domain_type), intent(inout) :: domain
+ 
+       type (mpas_pool_type), pointer :: state
+       type (field2DReal), pointer :: field_2d_ptr
+       type (field3DReal), pointer :: field_3d_ptr
+
+      call mpas_pool_get_subpool(domain % blocklist % structs, 'state', state)
+ 
+      call mpas_pool_get_field(state, 'rho_zz', field_2d_ptr, 1)
+      call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_c_v)
+
+      call mpas_pool_get_field(state, 'w', field_2d_ptr, 1)
+      call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_c_vP1)
+
+      call mpas_pool_get_field(state, 'scalars', field_3d_ptr, 1)
+      call mpas_dmpar_compact_halo_info(field_3d_ptr, compactHaloInfo_c_v_s)
+
+      call mpas_pool_get_field(state, 'u', field_2d_ptr, 1)
+      call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_e_v)
+
+
+ 
+    end subroutine mpas_atm_dynamics_init
+ 
+ 
+    !-----------------------------------------------------------------------
+    !  routine MPAS_atm_dynamics_finalize
+    !
+    !> \brief Finalize the dynamics component
+    !> \author Michael Duda
+    !> \date   23 March 2018
+    !> \details
+    !>  Free up dynamics-local memory and shut down infrastructure used
+    !>  only in the dynamics component of MPAS-Atmosphere.
+    !
+    !-----------------------------------------------------------------------
+    subroutine mpas_atm_dynamics_finalize(domain)
+ 
+       implicit none
+ 
+       type (domain_type), intent(inout) :: domain
+
+      deallocate(compactHaloInfo_c_v)
+      deallocate(compactHaloInfo_c_vP1)
+      deallocate(compactHaloInfo_c_v_s)
+      deallocate(compactHaloInfo_e_v)
+ 
+    end subroutine mpas_atm_dynamics_finalize
 
 
    subroutine atm_timestep(domain, dt, timeStamp, itimestep)
@@ -226,12 +295,6 @@ module atm_time_integration
       real (kind=RKIND), dimension(:,:), pointer :: gpu_tend_u, gpu_ru_p, gpu_rw_p, gpu_rho_pp, gpu_pv_edge, gpu_rho_edge
       real (kind=RKIND), dimension(:,:,:), pointer :: gpu_scalars_1, gpu_scalars_2
 
-!!!!!!!!!!!!!!!gpu_halo code !!!!!!!!!!
-      integer, dimension(:), pointer :: compactHaloInfo_c_v       ! Cells * Vertical levels
-      integer, dimension(:), pointer :: compactHaloInfo_c_vP1     ! Cells * Vertical levels Plus 1
-      integer, dimension(:), pointer :: compactHaloInfo_e_v       ! Edges * Vertical levels
-      integer, dimension(:), pointer :: compactHaloInfo_c_v_s     ! Cells * Vertical levels * Scalars
-
 
       integer :: rrpk_rank, rrpk_devices, rrpk_local_gpu_id
       rrpk_rank = domain % dminfo % my_proc_id
@@ -268,19 +331,6 @@ module atm_time_integration
       !   as they have the correct dimensions.
       !
 !!!!!!!!!!!!!gpu halo exchange!!!!!!!!!!!!!
-
-      call mpas_pool_get_field(state, 'rho_zz', field_2d_ptr, 1)
-      call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_c_v)
-
-      call mpas_pool_get_field(state, 'w', field_2d_ptr, 1)
-      call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_c_vP1)
-
-      call mpas_pool_get_field(state, 'scalars', field_3d_ptr, 1)
-      call mpas_dmpar_compact_halo_info(field_3d_ptr, compactHaloInfo_c_v_s)
-
-      call mpas_pool_get_field(state, 'u', field_2d_ptr, 1)
-      call mpas_dmpar_compact_halo_info(field_2d_ptr, compactHaloInfo_e_v)
-
       !
       ! allocate storage for physics tendency save
       !
@@ -769,32 +819,6 @@ module atm_time_integration
 !!!!!!!!!!!!!gpu_halos code !!!!!!!!!!!!!!
                call mpas_pool_get_array_gpu(diag,'rtheta_pp',gpu_rtheta_pp)
                call mpas_dmpar_exch_halo_acc(gpu_rtheta_pp, compactHaloInfo_c_v, (/ 1 /))
-
-
-!  complete update of horizontal momentum by including 3d divergence damping at
-!  the end of the acoustic step
-
-!               call mpas_timer_start('atm_divergence_damping_3d')
-!               block => domain % blocklist
-!               do while (associated(block))
-!                  call mpas_pool_get_subpool(block % structs, 'mesh', mesh)
-!                  call mpas_pool_get_subpool(block % structs, 'state', state)
-!                  call mpas_pool_get_subpool(block % structs, 'diag', diag)
-
-!                  call mpas_pool_get_dimension(block % dimensions, 'nThreads', nThreads)
-!                  call mpas_pool_get_dimension(block % dimensions, 'edgeThreadStart', edgeThreadStart)
-!                  call mpas_pool_get_dimension(block % dimensions, 'edgeThreadEnd', edgeThreadEnd)
-
-!!$OMP PARALLEL DO
-!                  do thread=1,nThreads
-!                     call atm_divergence_damping_3d( state, diag, mesh, block % configs, rk_sub_timestep(rk_step), &
-!                                                     edgeThreadStart(thread), edgeThreadEnd(thread) )
-!                  end do
-!!$OMP END PARALLEL DO
-
-!                  block => block % next
-!               end do
-!               call mpas_timer_stop('atm_divergence_damping_3d')
 
 
 !  complete update of horizontal momentum by including 3d divergence damping at
@@ -1406,11 +1430,6 @@ module atm_time_integration
       ! of the 'exner' exchange with other exchanges.
       !
 #endif
-
-      deallocate(compactHaloInfo_c_v)
-      deallocate(compactHaloInfo_c_vP1)
-      deallocate(compactHaloInfo_c_v_s)
-      deallocate(compactHaloInfo_e_v)
 
       call mpas_timer_start('atm_rk_summary')
       call summarize_timestep(domain)
