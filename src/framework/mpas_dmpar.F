@@ -21,7 +21,7 @@ module mpas_dmpar
 #define DMPAR_DEBUG_WRITE(M) ! call mpas_log_write(M)
 #define DMPAR_WARNING_WRITE(M) call mpas_log_write( M , messageType=MPAS_LOG_WARN)
 #define DMPAR_ERROR_WRITE(M) call mpas_log_write( M , messageType=MPAS_LOG_CRIT)
-
+#define PGI_ACC_NOSYNCQUEUE 1
    use mpas_derived_types
    use mpas_sort
    use mpas_hash
@@ -6074,7 +6074,6 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 
    end subroutine mpas_dmpar_exch_halo_field1d_real!}}}
 
-
 !-----------------------------------------------------------------------
 !  routine mpas_dmpar_exch_halo_2d_real_acc
 !
@@ -6091,7 +6090,6 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
 !
 !-----------------------------------------------------------------------
    subroutine mpas_dmpar_exch_halo_2d_real_acc(array, compactHaloInfo, haloLayersIn) !{{{
-
       implicit none
 
       real (kind=RKIND), dimension(:,:), intent(inout) :: array !< Input: Array storage for field whose halo will be communicated
@@ -6109,14 +6107,12 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       integer :: mpi_comm, mpi_proc_id
 
       real (kind=RKIND), dimension(:), pointer :: tempRBuffer
-
       !
       ! Unpack fields from the compacted halo info array
       !
       dimsizes(1:2) = compactHaloInfo(2:3)
       mpi_comm = compactHaloInfo(7)
       mpi_proc_id = compactHaloInfo(8)
-
       if(present(haloLayersIn)) then
         nHaloLayers = size(haloLayersIn)
         allocate(haloLayers(nHaloLayers))
@@ -6134,6 +6130,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       nFieldHaloLayers = compactHaloInfo(9)
 
 #ifdef _MPI
+      !$acc enter data copyin(compactHaloInfo)
       ! Setup Communication Lists
       call mpas_dmpar_build_comm_lists_acc(compactHaloInfo, haloLayers, sendList, recvList)
 
@@ -6143,7 +6140,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
         allocate(tempRBuffer(commListPtr % nList))
         commListPtr % rbuffer => tempRBuffer
         nullify(commListPtr % ibuffer)
-        !$acc enter data copyin(tempRBuffer)
+        !$acc enter data create(tempRBuffer)
         commListPtr => commListPtr % next
       end do
       
@@ -6161,7 +6158,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       idx = 11   ! First endPointID to send to
       do while(associated(commListPtr))
         allocate(tempRBuffer(commListPtr % nList))
-        !$acc enter data copyin(tempRBuffer)
+        !$acc enter data create(tempRBuffer)
         commListPtr % rbuffer => tempRBuffer
         nullify(commListPtr % ibuffer)
         bufferOffset = 0
@@ -6190,17 +6187,17 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
              nList = compactHaloInfo(idx)
           end do
           tempRBuffer=>commListPtr % rbuffer
-          !$acc data present(tempRBuffer,array) copyin(compactHaloInfo)
+          !$acc data present(tempRBuffer,array,compactHaloInfo)
           !$acc kernels
           do  i = 1, nList
              do j = 1, dimSizes(1)
                 tempRBuffer((compactHaloInfo(idx + nList + i)-1) * dimSizes(1) + j + bufferOffset) = array(j, compactHaloInfo(idx + i))
-                nAdded = nAdded + 1
+!                nAdded = nAdded + 1
              end do
           end do
           !$acc end kernels
           !$acc end data
-
+          nAdded = nList * dimSizes(1)
           idx = idx + 2 * nList + 1   ! Advance idx to the nList value of the next halo layer for the field
           nList = compactHaloInfo(idx)
           iFieldHalo = iFieldHalo + 1
@@ -6229,6 +6226,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       commListPtr => recvList
       idx = idx + 1   ! First endPointID to receive from
       do while(associated(commListPtr))
+!!$acc wait
         call MPI_Wait(commListPtr % reqID, MPI_STATUS_IGNORE, mpi_ierr)
         bufferOffset = 0
         if (commListPtr % procID /= compactHaloInfo(idx)) then
@@ -6256,7 +6254,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
              nList = compactHaloInfo(idx)
           end do
           tempRBuffer => commListPtr%rbuffer
-          !$acc data present(tempRBuffer, array) copyin(compactHaloInfo)
+          !$acc data present(tempRBuffer, array, compactHaloInfo)
           !$acc kernels
           do i = 1, nList
              do j = 1, dimSizes(1)
@@ -6309,8 +6307,8 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
      ! Destroy commLists.
      call mpas_dmpar_destroy_communication_list(sendList)
      call mpas_dmpar_destroy_communication_list(recvList)
+      !$acc exit data delete(compactHaloInfo)
 #endif
-
      deallocate(haloLayers)
 
    end subroutine mpas_dmpar_exch_halo_2d_real_acc !}}}
@@ -6430,13 +6428,13 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
              do j = 1, dimSizes(2)
                 do k = 1, dimSizes(1)
                    tempRBuffer((compactHaloInfo(idx + nList + i)-1) * dimSizes(1) * dimSizes(2) + (j-1) * dimSizes(1) + k + bufferOffset) = array(k, j, compactHaloInfo(idx + i))
-                   nAdded = nAdded + 1
+!                   nAdded = nAdded + 1
                 end do
              end do
           end do
           !$acc end kernels
           !$acc end data
-
+          nAdded = nList * dimSizes(1) * dimSizes(2)
           idx = idx + 2 * nList + 1   ! Advance idx to the nList value of the next halo layer for the field
           nList = compactHaloInfo(idx)
           iFieldHalo = iFieldHalo + 1
@@ -6463,6 +6461,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       commListPtr => recvList
       idx = idx + 1   ! First endPointID to receive from
       do while(associated(commListPtr))
+!acc wait
         call MPI_Wait(commListPtr % reqID, MPI_STATUS_IGNORE, mpi_ierr)
         bufferOffset = 0
         if (commListPtr % procID /= compactHaloInfo(idx)) then
@@ -6526,6 +6525,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       ! wait for mpi_isend to finish.
       commListPtr => sendList
       do while(associated(commListPtr))
+!$acc wait
         call MPI_Wait(commListPtr % reqID, MPI_STATUS_IGNORE, mpi_ierr)
         commListPtr => commListPtr % next
       end do
