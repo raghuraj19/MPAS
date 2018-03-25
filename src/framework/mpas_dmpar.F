@@ -6295,19 +6295,19 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       commListPtr => sendList
       do while(associated(commListPtr))
          tempRBuffer => commListPtr%rbuffer
-         !$acc exit data delete(tempRBuffer)
+         !!$acc exit data delete(tempRBuffer)
          commListPtr => commListPtr % next
       end do
       commListPtr => recvList
       do while(associated(commListPtr))
          tempRBuffer => commListPtr%rbuffer
-         !$acc exit data delete(tempRBuffer)
+         !!$acc exit data delete(tempRBuffer)
          commListPtr => commListPtr % next
       end do
      ! Destroy commLists.
      call mpas_dmpar_destroy_communication_list(sendList)
      call mpas_dmpar_destroy_communication_list(recvList)
-      !$acc exit data delete(compactHaloInfo)
+      !!$acc exit data delete(compactHaloInfo)
 #endif
      deallocate(haloLayers)
 
@@ -6533,13 +6533,13 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       commListPtr => sendList
       do while(associated(commListPtr))
         tempRBuffer => commListPtr%rbuffer
-        !$acc exit data delete(tempRBuffer)
+        !!$acc exit data delete(tempRBuffer)
         commListPtr => commListPtr % next
       end do
       commListPtr => recvList
       do while(associated(commListPtr))
         tempRBuffer => commListPtr%rbuffer
-        !$acc exit data delete(tempRBuffer)
+        !!$acc exit data delete(tempRBuffer)
         commListPtr => commListPtr % next
       end do
      ! Destroy commLists.
