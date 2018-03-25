@@ -6130,7 +6130,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       nFieldHaloLayers = compactHaloInfo(9)
 
 #ifdef _MPI
-      !$acc enter data copyin(compactHaloInfo)
+      !$acc enter data copyin(compactHaloInfo,dimsizes)
       ! Setup Communication Lists
       call mpas_dmpar_build_comm_lists_acc(compactHaloInfo, haloLayers, sendList, recvList)
 
@@ -6158,7 +6158,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       idx = 11   ! First endPointID to send to
       do while(associated(commListPtr))
         allocate(tempRBuffer(commListPtr % nList))
-        !$acc enter data create(tempRBuffer)
+        !$acc enter data create(tempRBuffer,array)
         commListPtr % rbuffer => tempRBuffer
         nullify(commListPtr % ibuffer)
         bufferOffset = 0
@@ -6187,15 +6187,16 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
              nList = compactHaloInfo(idx)
           end do
           tempRBuffer=>commListPtr % rbuffer
-          !$acc data present(tempRBuffer,array,compactHaloInfo)
-          !$acc kernels
+          !$acc data present(tempRBuffer, array,compactHaloInfo,dimsizes)
+          !$acc parallel vector_length(256)
+          !$acc loop collapse(2) 
           do  i = 1, nList
              do j = 1, dimSizes(1)
                 tempRBuffer((compactHaloInfo(idx + nList + i)-1) * dimSizes(1) + j + bufferOffset) = array(j, compactHaloInfo(idx + i))
 !                nAdded = nAdded + 1
              end do
           end do
-          !$acc end kernels
+          !$acc end parallel
           !$acc end data
           nAdded = nList * dimSizes(1)
           idx = idx + 2 * nList + 1   ! Advance idx to the nList value of the next halo layer for the field
@@ -6254,14 +6255,15 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
              nList = compactHaloInfo(idx)
           end do
           tempRBuffer => commListPtr%rbuffer
-          !$acc data present(tempRBuffer, array, compactHaloInfo)
-          !$acc kernels
+          !$acc data present(tempRBuffer, array, compactHaloInfo,dimsizes)
+          !$acc parallel vector_length(256)
+          !$acc loop collapse(2)
           do i = 1, nList
              do j = 1, dimSizes(1)
                 array(j, compactHaloInfo(idx + nList + i)) = tempRBuffer((compactHaloInfo(idx + i)-1)*dimSizeS(1) + j + bufferOffset)
              end do
           end do
-          !$acc end kernels
+          !$acc end parallel
           !$acc end data
           nAdded = max(nAdded, maxval(compactHaloInfo(idx+1:idx+nList)) * dimSizes(1))
 
@@ -6423,7 +6425,8 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
           end do
           tempRBuffer => commListPtr % rbuffer
           !$acc data present(tempRBuffer,array) copyin(compactHaloInfo)
-          !$acc kernels
+          !$acc parallel vector_length(256)
+          !$acc loop collapse(3)
           do  i = 1, nList
              do j = 1, dimSizes(2)
                 do k = 1, dimSizes(1)
@@ -6432,7 +6435,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
                 end do
              end do
           end do
-          !$acc end kernels
+          !$acc end parallel
           !$acc end data
           nAdded = nList * dimSizes(1) * dimSizes(2)
           idx = idx + 2 * nList + 1   ! Advance idx to the nList value of the next halo layer for the field
@@ -6490,7 +6493,8 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
           end do
           tempRBuffer => commListPtr%rbuffer
           !$acc data present (tempRBuffer, array) copyin(compactHaloInfo)
-          !$acc kernels
+          !$acc parallel vector_length(256)
+          !$acc loop collapse(3)
           do i = 1, nList
              do j = 1, dimSizes(2)
                 do k = 1, dimSizes(1)
@@ -6498,7 +6502,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
                 end do
              end do
           end do
-          !$acc end kernels
+          !$acc end parallel
           !$acc end data
           nAdded = max(nAdded, maxval(compactHaloInfo(idx+1:idx+nList)) * dimSizes(1) * dimSizes(2))
 
