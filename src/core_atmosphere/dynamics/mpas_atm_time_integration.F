@@ -26,11 +26,7 @@ module atm_time_integration
 #endif
 
    use mpas_atm_iau  
-
-#ifdef MPAS_OPENACC
    use openacc
-#endif
-
    integer :: timerid, secs, u_secs
 
    ! Used to store physics tendencies for dynamics variables
@@ -42,7 +38,6 @@ module atm_time_integration
    real (kind=RKIND), allocatable, dimension(:,:) :: delsq_theta, delsq_w, delsq_divergence
 !$acc declare create(delsq_theta, delsq_w, delsq_divergence)
    real (kind=RKIND), allocatable, dimension(:,:) :: delsq_u
-!   real (kind=RKIND), allocatable, dimension(:,:) :: delsq_circulation    ! no longer used -> removed 
    real (kind=RKIND), allocatable, dimension(:,:) :: delsq_vorticity
    real (kind=RKIND), allocatable, dimension(:,:) :: dpdz
 !$acc declare create(delsq_u,delsq_vorticity,dpdz)
@@ -216,13 +211,13 @@ module atm_time_integration
       real (kind=RKIND), dimension(:,:), pointer :: gpu_tend_u, gpu_ru_p, gpu_rw_p, gpu_rho_pp, gpu_pv_edge, gpu_rho_edge
       real (kind=RKIND), dimension(:,:,:), pointer :: gpu_scalars_1
 
-#ifdef MPAS_OPENACC
+
       integer :: rrpk_rank, rrpk_devices, rrpk_local_gpu_id
       rrpk_rank = domain % dminfo % my_proc_id
       rrpk_devices =  acc_get_num_devices(acc_device_nvidia)
       rrpk_local_gpu_id = mod(rrpk_rank,rrpk_devices)
       call acc_set_device_num(rrpk_local_gpu_id,acc_device_nvidia)
-#endif
+
 
       !
       ! Retrieve configuration options
@@ -269,14 +264,9 @@ module atm_time_integration
       call mpas_pool_get_dimension(state, 'nVertices', nVertices)
 
       allocate(qtot(nVertLevels,nCells+1))
-!      qtot(:,nCells+1) = 0.0_RKIND
       allocate(tend_rtheta_physics(nVertLevels,nCells+1))
-!      tend_rtheta_physics(:,nCells+1) = 0.0_RKIND
       allocate(tend_rho_physics(nVertLevels,nCells+1))
-!      tend_rho_physics(:,nCells+1) = 0.0_RKIND
       allocate(tend_ru_physics(nVertLevels,nEdges+1))
-!      tend_ru_physics(:,nEdges+1) = 0.0_RKIND
-!!$acc update device(qtot,tend_rtheta_physics,tend_rho_physics,tend_ru_physics)
       !
       ! Initialize RK weights
       !
@@ -470,9 +460,7 @@ module atm_time_integration
                allocate(delsq_vorticity(nVertLevels,nVertices+1))
                allocate(dpdz(nVertLevels,nCells+1))
                allocate(ke_vertex(nVertLevels,nVertices+1))
-!               ke_vertex(:,nVertices+1) = 0.0_RKIND
                allocate(ke_edge(nVertLevels,nEdges+1))
-!               ke_edge(:,nEdges+1) = 0.0_RKIND
 
       DYNAMICS_SUBSTEPS : do dynamics_substep = 1, dynamics_split
 
@@ -596,21 +584,13 @@ module atm_time_integration
                call mpas_pool_get_dimension(block % dimensions, 'edgeSolveThreadStart', edgeSolveThreadStart)
                call mpas_pool_get_dimension(block % dimensions, 'edgeSolveThreadEnd', edgeSolveThreadEnd)
 
-!               allocate(delsq_theta(nVertLevels,nCells+1))
-!               delsq_theta(:,nCells+1) = 0.0_RKIND
-!               allocate(delsq_w(nVertLevels,nCells+1))
-!               delsq_w(:,nCells+1) = 0.0_RKIND
-!!               allocate(qtot(nVertLevels,nCells+1))  ! initializing this earlier in solution sequence
-!               allocate(delsq_divergence(nVertLevels,nCells+1))
-!               delsq_divergence(:,nCells+1) = 0.0_RKIND
-!               allocate(delsq_u(nVertLevels,nEdges+1))
-!               delsq_u(:,nEdges+1) = 0.0_RKIND
-!!               allocate(delsq_circulation(nVertLevels,nVertices+1))  ! no longer used -> removed 
-!               allocate(delsq_vorticity(nVertLevels,nVertices+1))
-!               delsq_vorticity(:,nVertices+1) = 0.0_RKIND
-!               allocate(dpdz(nVertLevels,nCells+1))
-!               dpdz(:,nCells+1) = 0.0_RKIND
-!!$acc update device(delsq_theta,delsq_w,delsq_divergence,delsq_u,delsq_vorticity,dpdz)
+              delsq_theta(:,nCells+1) = 0.0_RKIND
+              delsq_w(:,nCells+1) = 0.0_RKIND
+              delsq_divergence(:,nCells+1) = 0.0_RKIND
+              delsq_u(:,nEdges+1) = 0.0_RKIND
+              delsq_vorticity(:,nVertices+1) = 0.0_RKIND
+              dpdz(:,nCells+1) = 0.0_RKIND
+
 !$OMP PARALLEL DO
                do thread=1,nThreads
                   call atm_compute_dyn_tend( tend, tend_physics, state, diag, mesh, block % configs, nVertLevels, rk_step, dt, & 
@@ -1124,10 +1104,8 @@ module atm_time_integration
                deallocate(ke_edge)
                deallocate(delsq_theta)
                deallocate(delsq_w)
-!!               deallocate(qtot)  ! deallocation after dynamics step complete, see below
                deallocate(delsq_divergence)
                deallocate(delsq_u)
-!!               deallocate(delsq_circulation)    ! no longer used -> removed 
                deallocate(delsq_vorticity)
                deallocate(dpdz)
 
@@ -1294,8 +1272,6 @@ module atm_time_integration
          call mpas_pool_get_subpool(block % structs, 'mesh', mesh)
 
          call mpas_pool_get_array_gpu(state, 'u', u, 2)
-!         call mpas_pool_get_array_gpu(state, 'u', gpu_u_2, 2)
-!!$acc update host(gpu_u_2)
          call mpas_pool_get_array_gpu(diag, 'uReconstructX', uReconstructX)
          call mpas_pool_get_array_gpu(diag, 'uReconstructY', uReconstructY)
          call mpas_pool_get_array_gpu(diag, 'uReconstructZ', uReconstructZ)
