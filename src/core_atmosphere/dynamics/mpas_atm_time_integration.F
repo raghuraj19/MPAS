@@ -1710,17 +1710,16 @@ module atm_time_integration
       real (kind=RKIND) :: dtseps, c2, qtotal, rcv
       real (kind=RKIND), dimension( nVertLevels ,nCells+1) :: b_tri, c_tri
 
+!$acc declare create(b_tri,c_tri)
 !$acc data present(cofrz, gamma_tri, a_tri, alpha_tri, &
 !$acc coftz, cofwr, cofwt, cofwz, &
-!$acc rdzw, cqw, fzm, fzp, p, pb, qtot, rb, rdzu, rt, rtb, t, zz)&
-!$acc create(b_tri,c_tri)
+!$acc rdzw, cqw, fzm, fzp, p, pb, qtot, rb, rdzu, rt, rtb, t, zz)
   
       !  set coefficients
       dtseps = .5*dts*(1.+epssm)
       rcv = rgas/(cp-rgas)
       c2 = cp*rcv
 
-	  
 !$acc parallel num_workers(8) vector_length(32)
 !$acc loop vector
 ! MGD bad to have all threads setting this variable?
@@ -1956,6 +1955,7 @@ module atm_time_integration
 !$acc data present(w_tend, &
 !$acc edgesoncell, edgesoncell_sign, fzm, fzp,nedgesoncell, u_tend, &
 !$acc zb3_cell, zb_cell, zz)
+
 !$acc parallel num_workers(8) vector_length(32)
 !$acc loop gang worker private(iEdge, flux)
       do iCell=cellSolveStart,cellSolveEnd
