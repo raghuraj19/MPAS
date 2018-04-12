@@ -2538,9 +2538,6 @@ module atm_time_integration
 !$acc end parallel
 !$acc end data
 
-!$acc update host(rtheta_pp, rtheta_pp_old, &
-!$acc ru_p, theta_m, cellsOnEdge)
-
    end subroutine atm_divergence_damping_3d_work
 
    subroutine atm_recover_large_step_variables( state, diag, tend, mesh, configs, dt, ns, rk_step, &
