@@ -4,7 +4,7 @@ module mpas_stream_manager
 #define STREAM_DEBUG_WRITE(M) ! call mpas_log_write(M)
 #define STREAM_WARNING_WRITE(M) call mpas_log_write( M , messageType=MPAS_LOG_WARN)
 #define STREAM_ERROR_WRITE(M) call mpas_log_write( M , messageType=MPAS_LOG_ERR)
-
+    use mpi
     use mpas_kind_types
     use mpas_derived_types
     use mpas_field_routines
