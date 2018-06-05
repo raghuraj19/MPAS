@@ -4,6 +4,9 @@ MODEL_FORMULATION =
 dummy:
 	( $(MAKE) error )
 
+custom:
+	( $(MAKE) all   )
+
 xlf:
 	( $(MAKE) all \
 	"FC_PARALLEL = mpxlf90" \
