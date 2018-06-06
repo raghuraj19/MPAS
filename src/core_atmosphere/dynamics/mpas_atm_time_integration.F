@@ -90,6 +90,11 @@ module atm_time_integration
        type (mpas_pool_type), pointer :: state
        type (field2DReal), pointer :: field_2d_ptr
        type (field3DReal), pointer :: field_3d_ptr
+      integer :: rank, devices, local_gpu_id
+      rank = domain % dminfo % my_proc_id
+      devices =  acc_get_num_devices(acc_device_nvidia)
+      local_gpu_id = mod(rank,devices)
+      call acc_set_device_num(local_gpu_id,acc_device_nvidia)
 
       call mpas_pool_get_subpool(domain % blocklist % structs, 'state', state)
  
@@ -296,11 +301,6 @@ module atm_time_integration
       real (kind=RKIND), dimension(:,:,:), pointer :: gpu_scalars_1, gpu_scalars_2
 
 
-      integer :: rrpk_rank, rrpk_devices, rrpk_local_gpu_id
-      rrpk_rank = domain % dminfo % my_proc_id
-      rrpk_devices =  acc_get_num_devices(acc_device_nvidia)
-      rrpk_local_gpu_id = mod(rrpk_rank,rrpk_devices)
-      call acc_set_device_num(rrpk_local_gpu_id,acc_device_nvidia)
 
 
       !
@@ -7433,15 +7433,10 @@ if (config_horiz_mixing == "2d_smagorinsky") then
 
 !$acc end data
 
-!!$acc update host(ru_save, rw_save, &
-!!$acc rtheta_p_save,rho_p_save, &
-!!$acc ruAvg,ruAvg_split, wwAvg, wwAvg_split, &
-!!$acc u_1,w_1,w_2,theta_m_1,rho_zz_1)
-!!$acc update host(ru, ru_save, rw, rw_save, &
-!!$acc rtheta_p,rtheta_p_save,rho_p,rho_p_save, &
-!!$acc rho_zz_old_split,ruAvg,ruAvg_split, wwAvg, wwAvg_split, &
-!!$acc u_1,u_2,w_1,w_2,theta_m_1,theta_m_2,rho_zz_1,rho_zz_2)
-
+!$acc update host(ru, ru_save, rw, rw_save, &
+!$acc rtheta_p,rtheta_p_save,rho_p,rho_p_save, &
+!$acc rho_zz_old_split,ruAvg,ruAvg_split, wwAvg, wwAvg_split, &
+!$acc u_1,u_2,w_1,w_2,theta_m_1,theta_m_2,rho_zz_1,rho_zz_2)
 
    end subroutine atm_rk_dynamics_substep_finish_work
    subroutine summarize_timestep(domain)
