@@ -6348,7 +6348,7 @@ subroutine mpas_dmpar_get_exch_list(haloLayer, ownedListField, neededListField, 
       integer, dimension(:), pointer :: haloLayers
       integer, dimension(3) :: dimsizes
       integer :: mpi_comm, mpi_proc_id
-      real, dimension(:), pointer :: tempRBuffer
+      real(kind=RKIND), dimension(:), pointer :: tempRBuffer
 
       !
       ! Unpack fields from the compacted halo info array
