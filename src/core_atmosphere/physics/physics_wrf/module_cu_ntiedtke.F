@@ -8,7 +8,8 @@
 ! * added the three corrections available from module_cu_ntiedtke.F available in the WRF github repository Z(not
 !   in the released version WRF 3.8.1.
 !   Laura D. Fowler (laura@ucar.edu) / 2016-10-18.
-
+!ntiedke enabled for GPU execution by the Korean Institute for Science and Technology Information. 
+! Work performed by Jae Youp Kim, Ji-Sun Kang, and Minsu Joh at KISTI. Committed: 2018-10-15  
 !=================================================================================================================
 !-----------------------------------------------------------------------
 !
