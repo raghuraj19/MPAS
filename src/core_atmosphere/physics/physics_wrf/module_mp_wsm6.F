@@ -10,7 +10,8 @@
 !   * changed the declaration of refl_10cm to optional since subroutine refl10cm_wsm6 is called
 !     in mpas_atmphys_driver_microphysics.F.
 !     Laura D. Fowler (laura@ucar.edu) / 2016-10-17.
-
+!WSM6 enabled for GPU execution by the Korean Institute for Science and Technology Information. Work performed by Jae Youp Kim, Ji-Sun Kang, and Minsu Joh at KISTI.
+! Committed: 2018-10-15
 !=================================================================================================================
 #ifdef SINGLE_PRECISION
 #  define VREC vsrec
