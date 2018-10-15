@@ -6,11 +6,12 @@
 !   * calculated the dry hydrostatic pressure using the dry air density.
 !   * added outputs of the vertical diffusivity coefficients.
 !     Laura D. Fowler (laura@ucar.edu) / 2016-10-26.
-
+! 
+!YSU module enabled for GPU execution by the Korean Institute for Science and
+! Technology Information. Work performed by Jae Youp Kim, Ji-Sun Kang, and Minsu
+! Joh at KISTI / commited 2018-10-15 
 !=================================================================================================================
 !WRF:model_layer:physics
-!
-!
 !
 !
 !
