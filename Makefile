@@ -452,9 +452,6 @@ ifeq "$(USE_PIO2)" "true"
 	FCINCLUDES = -I$(PIO)/include
 	override CPPFLAGS += -DUSE_PIO2
 	LIBS = -L$(PIO)/lib -lpiof -lpioc
-ifneq ($(wildcard $(PIO)/lib/libgptl.a), ) # Check for GPTL library for PIO2
-	LIBS += -lgptl
-endif
 else
 	CPPINCLUDES = -I$(PIO)/include
 	FCINCLUDES = -I$(PIO)/include
@@ -465,9 +462,6 @@ ifeq "$(USE_PIO2)" "true"
 	FCINCLUDES = -I$(PIO)/include
 	override CPPFLAGS += -DUSE_PIO2
 	LIBS = -L$(PIO) -lpiof -lpioc
-ifneq ($(wildcard $(PIO)/libgptl.a), ) # Check for GPTL library for PIO2
-	LIBS += -lgptl
-endif
 else
 	CPPINCLUDES = -I$(PIO)
 	FCINCLUDES = -I$(PIO)
