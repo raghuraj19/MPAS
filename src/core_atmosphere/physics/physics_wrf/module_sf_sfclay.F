@@ -5,7 +5,9 @@
 !modifications to sourcecode for MPAS:
 !   * added the actual size of each cell in the calculation of the Mahrt and Sun low-resolution correction.
 !     Laura D. Fowler (laura@ucar.edu) / 2016-10-26. 
-
+! Monin-Obukhov module enabled for GPU execution by the Korean Institute for
+! Science and Technology Information. Work performed by Jae Youp Kim, Ji-Sun Kang, and Minsu
+! Joh at KISTI / commited 2018-10-15
 !=================================================================================================================
 !WRF:MODEL_LAYER:PHYSICS
 !
