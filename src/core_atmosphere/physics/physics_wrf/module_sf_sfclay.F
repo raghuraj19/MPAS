@@ -223,11 +223,21 @@ CONTAINS
 
       INTEGER ::  I,J
 
+!$acc data pcopyin(dz8w, QV3D, P3D, T3D, MAVAIL, PBLH, XLAND, TSK, U3D, V3D, &
+!$acc              PSFC, dxCell) &
+!$acc        pcopy(REGIME, HFX, QFX,LH, MOL, RMOL, GZ1OZ0, WSPD, BR, PSIM,   &
+!$acc              PSIH, FM, FH, ZNT, ZOL, UST, CPM, CHS2, CQS2, CHS, FLHC,  &
+!$acc              FLQC, QGH, USTM, qsfc) &
+!$acc      pcopyout(ck, cka, cd, cda, u10, v10, th2, t2, q2) &
+!$acc       pcreate(U1D, V1D, QV1D, P1D, T1D, dz8w1d)
       DO J=jts,jte
+!$acc kernels
         DO i=its,ite
           dz8w1d(I) = dz8w(i,1,j)
         ENDDO
+!$acc end kernels
    
+!$acc kernels
         DO i=its,ite
            U1D(i) =U3D(i,1,j)
            V1D(i) =V3D(i,1,j)
@@ -235,6 +245,7 @@ CONTAINS
            P1D(i) =P3D(i,1,j)
            T1D(i) =T3D(i,1,j)
         ENDDO
+!$acc end kernels
 
         !  Sending array starting locations of optional variables may cause
         !  troubles, so we explicitly change the call.
@@ -266,6 +277,8 @@ CONTAINS
 #endif
                                                                    )
       ENDDO
+!$acc end data
+
 
  
    END SUBROUTINE SFCLAY
@@ -407,21 +420,31 @@ CONTAINS
       REAL    ::  Z0T, CZC
 !-------------------------------------------------------------------
       KL=kte
-
+!$acc data pcopyin(MAVAIL, PBLH, XLAND, TSK, PSFCPA, dz8w1d, UX, VX, QV1D, &
+!$acc              P1d, T1D, dxCell, PSIMTB, PSIHTB) &
+!$acc        pcopy(REGIME, HFX, QFX, MOL, RMOL, GZ1OZ0, WSPD, BR, PSIM, &
+!$acc              PSIH, FM, FH, ZNT, ZOL, UST, CPM, CHS2, CQS2, CHS, FLHC, &
+!$acc              FLQC, QGH, QSFC, USTM) &
+!$acc     pcopyout(U10, V10, TH2, T2, Q2, LH, ck, cka, cd, cda) &
+!$acc      pcreate(ZA, THVX, ZQKL, ZQKLP1, THX, QX, PSIH2, PSIM2, PSIH10, &
+!$acc              PSIM10, DENOMQ, DENOMQ2, DENOMT2, WSPDI, GZ2OZ0, GZ10Oz0, &
+!$acc              RHOX, GOVRTH, TGDSA, SCR3, SCR4, THGB, PSFC)
+!$acc kernels
       DO i=its,ite
 ! PSFC cb
          PSFC(I)=PSFCPA(I)/1000.
       ENDDO
 !                                                      
 !----CONVERT GROUND TEMPERATURE TO POTENTIAL TEMPERATURE:  
+!                                                      
 !                                                            
-      DO 5 I=its,ite                                   
+      DO I=its,ite                                   
         TGDSA(I)=TSK(I)                                    
 ! PSFC cb
 !        THGB(I)=TSK(I)*(100./PSFC(I))**ROVCP                
         THGB(I)=TSK(I)*(P1000mb/PSFCPA(I))**ROVCP   
-    5 CONTINUE                                               
-!                                                            
+      END DO
+!$acc end kernels                                             
 !-----DECOUPLE FLUX-FORM VARIABLES TO GIVE U,V,T,THETA,THETA-VIR.,
 !     T-VIR., QV, AND QC AT CROSS POINTS AND AT KTAU-1.  
 !                                                                 
@@ -441,8 +464,10 @@ CONTAINS
                                                    
 !.....SCR3(I,K) STORE TEMPERATURE,                           
 !     SCR4(I,K) STORE VIRTUAL TEMPERATURE.                                       
-                                                                                 
-      DO 30 I=its,ite
+                                                   
+                
+!$acc kernels                                                                 
+      DO I=its,ite
 ! PL cb
          PL=P1D(I)/1000.
          SCR3(I)=T1D(I)                                                   
@@ -452,7 +477,7 @@ CONTAINS
          SCR4(I)=SCR3(I)                                                    
          THVX(I)=THX(I)                                                     
          QX(I)=0.                                                             
-   30 CONTINUE                                                                 
+      END DO                                                                 
 !                                                                                
       DO I=its,ite
          QGH(I)=0.                                                                
@@ -462,14 +487,18 @@ CONTAINS
       ENDDO
 !                                                                                
 !     IF(IDRY.EQ.1)GOTO 80                                                   
-      DO 50 I=its,ite
+!                                                                                
+      DO I=its,ite
          QX(I)=QV1D(I)                                                    
          TVCON=(1.+EP1*QX(I))                                      
          THVX(I)=THX(I)*TVCON                                               
          SCR4(I)=SCR3(I)*TVCON                                              
-   50 CONTINUE                                                                 
-!                                                                                
-      DO 60 I=its,ite
+      END DO      
+!$acc end kernels                                                           
+!                
+!$acc kernels          
+!$acc loop private(E1)                                                      
+      DO I=its,ite
         E1=SVP1*EXP(SVP2*(TGDSA(I)-SVPT0)/(TGDSA(I)-SVP3))                       
 !  for land points QSFC can come from previous time step
         if(xland(i).gt.1.5.or.qsfc(i).le.0.0)QSFC(I)=EP2*E1/(PSFC(I)-E1)                                                 
@@ -479,33 +508,36 @@ CONTAINS
         PL=P1D(I)/1000.
         QGH(I)=EP2*E1/(PL-E1)                                                 
         CPM(I)=CP*(1.+0.8*QX(I))                                   
-   60 CONTINUE                                                                   
+      END DO
+!$acc end kernels                                                                   
    80 CONTINUE
                                                                                  
 !-----COMPUTE THE HEIGHT OF FULL- AND HALF-SIGMA LEVELS ABOVE GROUND             
 !     LEVEL, AND THE LAYER THICKNESSES.                                          
                                                                                  
-      DO 90 I=its,ite
+                
+!$acc kernels                                                                 
+      DO I=its,ite
         ZQKLP1(I)=0.
         RHOX(I)=PSFC(I)*1000./(R*SCR4(I))                                       
-   90 CONTINUE                                                                   
+      END DO                                                                   
 !                                                                                
-      DO 110 I=its,ite                                                   
+      DO I=its,ite                                                   
            ZQKL(I)=dz8w1d(I)+ZQKLP1(I)
-  110 CONTINUE                                                                 
+      END DO                                                                 
 !                                                                                
-      DO 120 I=its,ite
+      DO I=its,ite
          ZA(I)=0.5*(ZQKL(I)+ZQKLP1(I))                                        
-  120 CONTINUE                                                                 
+      END DO                                                                 
 !                                                                                
-      DO 160 I=its,ite
+      DO I=its,ite
         GOVRTH(I)=G/THX(I)                                                    
-  160 CONTINUE                                                                   
-                                                                                 
+      END DO                                                             
 !-----CALCULATE BULK RICHARDSON NO. OF SURFACE LAYER, ACCORDING TO               
 !     AKB(1976), EQ(12).                                                         
+                                                                                 
                    
-      DO 260 I=its,ite
+      DO I=its,ite
         GZ1OZ0(I)=ALOG(ZA(I)/ZNT(I))                                        
         GZ2OZ0(I)=ALOG(2./ZNT(I))                                        
         GZ10OZ0(I)=ALOG(10./ZNT(I))                                        
@@ -556,9 +588,8 @@ CONTAINS
         RMOL(I)=-GOVRTH(I)*DTHVDZ*ZA(I)*KARMAN
 !jdf
 
-  260 CONTINUE                                                                   
-
-!                                                                                
+     END DO  
+!$acc end kernels                                                                 
 !-----DIAGNOSE BASIC PARAMETERS FOR THE APPROPRIATED STABILITY CLASS:            
 !                                                                                
 !                                                                                
@@ -582,6 +613,16 @@ CONTAINS
 !                                                                                
 !CCCCC                                                                           
 
+!                                                                                
+!                                                                                
+!                                                                                
+!                                                                                
+!                                                                                
+!                                                                                
+!                                                                                
+!                                                                                
+!                                                                                
+!$acc kernels
       DO 320 I=its,ite
 !CCCCC                                                                           
 !CC     REMOVE REGIME 3 DEPENDENCE ON PBL HEIGHT                                 
@@ -714,12 +755,14 @@ CONTAINS
 
         RMOL(I) = ZOL(I)/ZA(I)  
 
-  320 CONTINUE                                                                   
-!                                                                                
+  320 CONTINUE            
+!$acc end kernels                                                       
 !-----COMPUTE THE FRICTIONAL VELOCITY:                                           
 !     ZA(1982) EQS(2.60),(2.61).                                                 
 !                                                                                
-      DO 330 I=its,ite
+! 
+!$acc kernels                                                                               
+      DO I=its,ite
         DTG=THX(I)-THGB(I)                                                   
         PSIX=GZ1OZ0(I)-PSIM(I)                                                   
         PSIX10=GZ10OZ0(I)-PSIM10(I)
@@ -840,25 +883,30 @@ CONTAINS
         DENOMT2(I)=PSIT2
         FM(I)=PSIX
         FH(I)=PSIT
-  330 CONTINUE                                                                   
+      END DO
+!$acc end kernels                                                                   
 !                                                                                
-  335 CONTINUE                                                                   
+                                                                 
                                                                                   
 !-----COMPUTE THE SURFACE SENSIBLE AND LATENT HEAT FLUXES:                       
       IF ( PRESENT(SCM_FORCE_FLUX) ) THEN
          IF (SCM_FORCE_FLUX.EQ.1) GOTO 350              
       ENDIF
+!$acc kernels
       DO i=its,ite
         QFX(i)=0.                                                              
         HFX(i)=0.                                                              
       ENDDO
+!$acc end kernels
   350 CONTINUE
 
       IF (ISFFLX.EQ.0) GOTO 410                                                
                                                                                  
 !-----OVER WATER, ALTER ROUGHNESS LENGTH (ZNT) ACCORDING TO WIND (UST).
                                                                                  
-      DO 360 I=its,ite
+                 
+!$acc kernels                                                                
+      DO I=its,ite
         IF((XLAND(I)-1.5).GE.0)THEN                                            
 !         ZNT(I)=CZO*UST(I)*UST(I)/G+OZO                                   
 ! Since V3.7 (ref: EC Physics document for Cy36r1)
@@ -900,7 +948,10 @@ CONTAINS
         ELSE                                                                     
           FLHC(I)=0.                                                             
         ENDIF                                                                    
-  360 CONTINUE
+     END DO
+!$acc end kernels
+!-----COMPUTE SURFACE MOIST FLUX:                                               
+!     IF(IDRY.EQ.1)GOTO 390
 
 !                                                                                
 !-----COMPUTE SURFACE MOIST FLUX:                                               
@@ -909,17 +960,21 @@ CONTAINS
      IF ( PRESENT(SCM_FORCE_FLUX) ) THEN
         IF (SCM_FORCE_FLUX.EQ.1) GOTO 405                                     
      ENDIF
-!                                                                               
-      DO 370 I=its,ite
+! 
+!$acc kernels                                                                              
+      DO I=its,ite
         QFX(I)=FLQC(I)*(QSFC(I)-QX(I))                                     
         QFX(I)=AMAX1(QFX(I),0.)                                            
         LH(I)=XLV*QFX(I)
-  370 CONTINUE                                                                 
+      END DO
+!$acc end kernels                                                                 
+!-----COMPUTE SURFACE HEAT FLUX:                                                 
                                                                                 
 !-----COMPUTE SURFACE HEAT FLUX:                                                 
 !                                                                                
-  390 CONTINUE                                                                 
-      DO 400 I=its,ite
+  390 CONTINUE   
+!$acc kernels                                                              
+      DO I=its,ite
         IF(XLAND(I)-1.5.GT.0.)THEN                                           
           HFX(I)=FLHC(I)*(THGB(I)-THX(I))                                
 !         IF ( PRESENT(ISFTCFLX) ) THEN
@@ -932,10 +987,12 @@ CONTAINS
           HFX(I)=FLHC(I)*(THGB(I)-THX(I))                                
           HFX(I)=AMAX1(HFX(I),-250.)                                       
         ENDIF                                                                  
-  400 CONTINUE                                                                 
+      END DO
+!$acc end kernels                                                                 
 
   405 CONTINUE                                                                 
          
+!$acc kernels
       DO I=its,ite
          IF((XLAND(I)-1.5).GE.0)THEN
            ZL=ZNT(I)
@@ -950,8 +1007,10 @@ CONTAINS
          CQS2(I)=UST(I)*KARMAN/DENOMQ2(I)
          CHS2(I)=UST(I)*KARMAN/DENOMT2(I)
       ENDDO
+!$acc end kernels
                                                                         
-  410 CONTINUE                                                                   
+  410 CONTINUE       
+!$acc end data                                                            
 !jdf
 !     DO I=its,ite
 !       IF(UST(I).GE.0.1) THEN
