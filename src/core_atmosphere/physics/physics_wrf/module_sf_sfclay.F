@@ -952,10 +952,8 @@ CONTAINS
         ENDIF                                                                    
      END DO
 !$acc end kernels
-!-----COMPUTE SURFACE MOIST FLUX:                                               
-!     IF(IDRY.EQ.1)GOTO 390
 
-!                                                                                
+!
 !-----COMPUTE SURFACE MOIST FLUX:                                               
 !
 !     IF(IDRY.EQ.1)GOTO 390
@@ -970,7 +968,6 @@ CONTAINS
         LH(I)=XLV*QFX(I)
       END DO
 !$acc end kernels                                                                 
-!-----COMPUTE SURFACE HEAT FLUX:                                                 
                                                                                 
 !-----COMPUTE SURFACE HEAT FLUX:                                                 
 !                                                                                
