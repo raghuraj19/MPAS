@@ -17,6 +17,8 @@
 !
 !
 !
+!
+!
 module module_bl_ysu
 contains
 !
@@ -385,20 +387,15 @@ contains
 !$acc end kernels
      if(present(rqiblten)) then
 !$acc kernels
-     do k = kts,kte
-       do i = its,ite
-         rqiblten(i,k,j) = rqvbl2dt(i,k+kte+kte)
+       do k = kts,kte
+         do i = its,ite
+           rqiblten(i,k,j) = rqvbl2dt(i,k+kte+kte)
+         enddo
        enddo
-     enddo
 !$acc end kernels
      end if
 !
    enddo
-
-    CALL SYSTEM_CLOCK(END_CLOCK, RATE)
-    END_TIME = REAL(END_CLOCK)/REAL(RATE)
-    TIME = END_TIME-START_TIME
-    WRITE(*,*) "YSU_WITHOUT_I/O = ", TIME
 
 
 !$acc end data
@@ -1517,21 +1514,21 @@ contains
 !
 ! paj: ctopo=1 if topo_wind=0 (default)
 ! mchen add this line to make sure NMM can still work with YSU PBL
-     if(present(ctopo)) then
+   if(present(ctopo)) then
 !$acc kernels
-   do i = its,ite
+     do i = its,ite
        ad(i,1) = 1.+ctopo(i)*ust(i)**2/wspd1(i)*rhox(i)*g/del(i,1)*dt2         &
         *(wspd1(i)/wspd(i))**2
-   enddo
+     enddo
 !$acc end kernels
-     else
+   else
 !$acc kernels
-   do i = its,ite
+     do i = its,ite
        ad(i,1) = 1.+ust(i)**2/wspd1(i)*rhox(i)*g/del(i,1)*dt2                  &
         *(wspd1(i)/wspd(i))**2
-   enddo
+     enddo
 !$acc end kernels
-     endif
+   endif
 !$acc kernels
    do i = its,ite
      f1(i,1) = ux(i,1)+uox(i)*ust(i)**2*g/del(i,1)*dt2/wspd1(i)
@@ -1609,22 +1606,22 @@ contains
        vtend = (f2(i,k)-vx(i,k))*rdt
        utnp(i,k) = utnp(i,k)+utend
        vtnp(i,k) = vtnp(i,k)+vtend
-!       dusfc(i) = dusfc(i) + utend*conwrc*del(i,k)
-!       dvsfc(i) = dvsfc(i) + vtend*conwrc*del(i,k)
+       dusfc(i) = dusfc(i) + utend*conwrc*del(i,k)
+       dvsfc(i) = dvsfc(i) + vtend*conwrc*del(i,k)
      enddo
    enddo
 !$acc end kernels
 !
 ! paj: ctopo2=1 if topo_wind=0 (default)
 !
-     if(present(ctopo).and.present(ctopo2)) then ! mchen for NMM
+   if(present(ctopo).and.present(ctopo2)) then ! mchen for NMM
 !$acc kernels
-   do i = its,ite
+     do i = its,ite
        u10(i) = ctopo2(i)*u10(i)+(1-ctopo2(i))*ux(i,1)
        v10(i) = ctopo2(i)*v10(i)+(1-ctopo2(i))*vx(i,1)
-   enddo
+     enddo
 !$acc end kernels
-     endif !mchen
+   endif !mchen
 !
 !---- end of vertical diffusion
 !
@@ -1771,7 +1768,6 @@ contains
 !
    real    :: fk
    integer :: i,k,l,n,it
-   real    :: cm_reg, cl_reg, cu_reg, au_reg
 !
 !-------------------------------------------------------------------------------
 !
@@ -1788,11 +1784,11 @@ contains
      enddo
    enddo
 !
+   do it = 1,nt
      do k = kts+1,n-1
-   do i = its,l
+       do i = its,l
          fk = 1./(cm(i,k)-cl(i,k)*au(i,k-1))
          au(i,k) = fk*cu(i,k)
-       do it = 1,nt
          f2(i,k,it) = fk*(r2(i,k,it)-cl(i,k)*f2(i,k-1,it))
        enddo
      enddo
