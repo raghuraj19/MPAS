@@ -10,6 +10,7 @@
 !   * changed the declaration of refl_10cm to optional since subroutine refl10cm_wsm6 is called
 !     in mpas_atmphys_driver_microphysics.F.
 !     Laura D. Fowler (laura@ucar.edu) / 2016-10-17.
+
 !WSM6 enabled for GPU execution by the Korean Institute for Science and Technology Information. Work performed by Jae Youp Kim, Ji-Sun Kang, and Minsu Joh at KISTI.
 ! Committed: 2018-10-15
 !=================================================================================================================
@@ -227,15 +228,10 @@ CONTAINS
          ENDDO
          ENDDO
 !$acc end kernels
-         CALL SYSTEM_CLOCK(END_CLOCK, RATE)
-         END_TIME = REAL(END_CLOCK)/REAL(RATE)
-         TIME = END_TIME-START_TIME
-         WRITE(*,*) "WSM^_WITHOUT_I/O = ", TIME
 !$acc end data
 
 !+---+-----------------------------------------------------------------+
          IF ( PRESENT (diagflag) ) THEN
-         write(*,*) "diagflag is on"
          if (diagflag .and. do_radar_ref == 1) then
             DO I=its,ite
                DO K=kts,kte
@@ -256,7 +252,6 @@ CONTAINS
          ENDIF
 
         if (has_reqc.ne.0 .and. has_reqi.ne.0 .and. has_reqs.ne.0) then
-         write(*,*) "has_reqc is on"
           do i=its,ite
             do k=kts,kte
               re_qc(k) = 2.51E-6
@@ -592,8 +587,8 @@ CONTAINS
 !       enddo
 !     enddo
 #ifdef _OPENACC
-      do i = its, ite
-        do k = kts, kte
+      do k = kts, kte
+        do i = its, ite
           denfac(i,k) = sqrt(den0/den(i,k))
         end do
       end do
