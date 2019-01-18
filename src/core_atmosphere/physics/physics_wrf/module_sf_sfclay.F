@@ -615,15 +615,6 @@ CONTAINS
 !                                                                                
 !CCCCC                                                                           
 
-!                                                                                
-!                                                                                
-!                                                                                
-!                                                                                
-!                                                                                
-!                                                                                
-!                                                                                
-!                                                                                
-!                                                                                
 !$acc kernels
       DO 320 I=its,ite
 !CCCCC                                                                           
