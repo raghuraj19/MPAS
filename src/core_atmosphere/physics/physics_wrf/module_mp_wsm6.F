@@ -173,8 +173,6 @@ CONTAINS
   REAL, DIMENSION( kts:kte ) :: qc1d
   REAL, DIMENSION( kts:kte ) :: qi1d
   REAL, DIMENSION( kts:kte ) :: re_qc, re_qi, re_qs
-  INTEGER :: start_clock, end_clock, rate
-  REAL :: start_time, end_time, time
 
       DO j=jts,jte
 !$acc data pcopy(th,q,qc,qi,qr,qs,qg,rain, rainncv, sr, snow, snowncv, &
@@ -182,8 +180,6 @@ CONTAINS
 !$acc    pcopyin(den, pii, p, delz, delt, g, rd, rv, t0c, den0, cpd, cpv,&
 !$acc            ep1, ep2, qmin, xls, xlv0, xlf0, cliq, cice, psat, denr)&
 !$acc     create(t, qci, qrs)
-         CALL SYSTEM_CLOCK(START_CLOCK, RATE)
-         START_TIME = REAL(START_CLOCK)/REAL(RATE)
 !$acc kernels
          DO k=kts,kte
 !$acc loop independent
