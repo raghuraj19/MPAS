@@ -232,10 +232,6 @@ contains
                                                                         dtsfc, &
                                                                         dqsfc
 
-! for timer
-  INTEGER :: start_clock, end_clock, rate
-  REAL    :: start_time, end_time, time
-
 #if defined(mpas)
 !MPAS specific optional arguments for additional diagnostics:
    real,intent(in),dimension(ims:ime,kms:kme,jms:jme),optional:: rho
@@ -250,9 +246,6 @@ contains
 !$acc              delta, u10, v10, znt, ust, hpbl, wspd, regime, rqiblten)       &
 !$acc     pcopyout(kpbl2d, kzhout, kzmout, kzqout)                                &
 !$acc      pcreate(rqvbl2dt, qv2d, pdh, pdhi, dusfc, dvsfc, dtsfc, dqsfc)
-
-    CALL SYSTEM_CLOCK(START_CLOCK, RATE)
-    START_TIME = REAL(START_CLOCK)/REAL(RATE)
 
  
 #if defined(mpas)
