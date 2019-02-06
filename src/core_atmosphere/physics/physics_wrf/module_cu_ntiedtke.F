@@ -454,8 +454,7 @@ contains
       enddo
 !$acc end kernels
 
-      !if(present(rqccuten))then
-      if(.true.)then
+      if(present(rqccuten))then
         if ( f_qc ) then
 !$acc kernels
 !$acc loop independent private(zz)
@@ -470,8 +469,7 @@ contains
         endif
       endif
 
-      !if(present(rqicuten))then !for kgen
-      if(.true.)then
+      if(present(rqicuten))then
         if ( f_qi ) then
 !$acc kernels
 !$acc loop independent private(zz)
@@ -2995,7 +2993,7 @@ contains
 !kimjy error loop
 !$acc kernels
         do jl = 1 , klon
-          if(jlx(jl) == .false.) cycle 
+          if(.not. jlx(jl)) cycle 
           if ( pqu(jl,jk) /= zqold(jl) ) then
 !-------------------------------------------------------------------------------------
 !     function inling foealfa
@@ -3013,7 +3011,7 @@ contains
         end do
 !kimjy error loop
         do jl = 1 , klon
-          if(jlx(jl) == .false.) cycle 
+          if(.not. jlx(jl)) cycle 
           if ( pqu(jl,jk) /= zqold(jl) ) then
             klab(jl,jk) = 2
             plu(jl,jk) = plu(jl,jk) + zqold(jl) - pqu(jl,jk)
@@ -3164,7 +3162,7 @@ contains
           end if
         end do
         do jl = 1 , klon
-          if(jlx(jl) == .false.) cycle 
+          if(.not. jlx(jl)) cycle 
           pmful(jl,jk) = plu(jl,jk)*pmfu(jl,jk)
           pmfus(jl,jk) = (cpd*ptu(jl,jk)+pgeoh(jl,jk))*pmfu(jl,jk)
           pmfuq(jl,jk) = pqu(jl,jk)*pmfu(jl,jk)
