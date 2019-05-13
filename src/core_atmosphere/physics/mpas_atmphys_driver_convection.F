@@ -9,7 +9,6 @@
  module mpas_atmphys_driver_convection
  use mpas_kind_types
  use mpas_pool_routines
- use mpas_timer, only : mpas_timer_start, mpas_timer_stop
 
  use mpas_atmphys_constants
  use mpas_atmphys_utilities
@@ -469,7 +468,6 @@
  convection_select: select case(convection_scheme)
 
     case ("cu_grell_freitas")
-       call mpas_timer_start('Grell-Freitas')
        call cu_grell_freitas( &
              itimestep       = itimestep              , dt            = dt_dyn          , &
              dxCell          = dx_p                   , areaCell      = area_p          , &
@@ -500,7 +498,6 @@
              ims = ims , ime = ime , jms = jms , jme = jme , kms = kds , kme = kme      , &
              its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte        &
                             )
-       call mpas_timer_stop('Grell-Freitas')
 
     case ("cu_kain_fritsch")
        if(itimestep == 1) then
@@ -509,7 +506,6 @@
           ktau = itimestep + 1
        endif
 
-       call mpas_timer_start('Kain-Fritsch')
        call  kf_eta_cps ( &
              pcps            = pres_hyd_p      , t         = t_p        ,            &
              dt              = dt_dyn          , ktau      = ktau       ,            &
@@ -540,10 +536,8 @@
              ims = ims , ime = ime , jms = jms , jme = jme , kms = kds , kme = kme , &
              its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte   &
                         )
-       call mpas_timer_stop('Kain-Fritsch')
 
     case("cu_tiedtke")
-       call mpas_timer_start('Tiedtke')
        call cu_tiedtke( &
              pcps        = pres_hyd_p    , p8w       = pres2_hyd_p   ,               &
              znu         = znu_hyd_p     , t3d       = t_p           ,               &
@@ -566,10 +560,8 @@
              ims = ims , ime = ime , jms = jms , jme = jme , kms = kds , kme = kme , &
              its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte   &
                       )
-       call mpas_timer_stop('Tiedtke')
 
     case("cu_ntiedtke")
-       call mpas_timer_start('New_Tiedtke')
        call cu_ntiedtke( &
              pcps      = pres_hyd_p  , p8w         = pres2_hyd_p ,                   &
              t3d       = t_p         , dz8w        = dz_p        ,                   &
@@ -593,7 +585,6 @@
              ims = ims , ime = ime , jms = jms , jme = jme , kms = kds , kme = kme , &
              its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte   &
                               )
-       call mpas_timer_stop('New_Tiedtke')
 
     case default
 

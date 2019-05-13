@@ -24,7 +24,6 @@ module ocn_sea_ice
    use mpas_pool_routines
    use mpas_timekeeping
    use ocn_constants
-   use ocn_equation_of_state
 
    implicit none
    private
@@ -65,7 +64,7 @@ contains
 !> \brief   Performs the formation of Sea Ice within the ocean.
 !> \author  Doug Jacobsen
 !> \date    08/19/2013
-!> \details
+!> \details 
 !>   ocn_sea_ice_formation performs the adjustment of tracer values
 !>   and layerThickness based on the formation of frazil ice within the ocean.
 !
@@ -118,6 +117,7 @@ contains
       real (kind=RKIND) :: referenceSalinity, iceSalinity
       real (kind=RKIND) :: freezingTemp, density_ice
       real (kind=RKIND), dimension(:), allocatable :: iceTracer
+      real (kind=RKIND), pointer :: config_density0
 
       if(.not. frazilFormationOn) return
 
@@ -126,17 +126,15 @@ contains
       call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
       nTracers = size(tracers, dim=1)
 
+      call mpas_pool_get_config(ocnConfigs, 'config_density0', config_density0)
 
       call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
 
       allocate(iceTracer(nTracers))
       iceTracer = 0.0_RKIND
       iceTracer(indexSalinity) = sea_ice_salinity * ppt_to_salt
-
       density_ice = rho_ice
 
-      !$omp do schedule(runtime) private(maxLevel, netEnergyChange, k, freezingTemp, availableEnergyChange, energyChange, &
-      !$omp                              temperatureChange, thicknessChange, iceThicknessChange, iTracer)
       do iCell = 1, nCellsSolve ! Check performance of these two loop definitions
 !     do iCell = nCellsSolve, 1, -1
          maxLevel = min(maxLevelCell(iCell), verticalLevelCap)
@@ -144,13 +142,11 @@ contains
 
          ! Loop over vertical levels, starting from the bottom of a column
          do k = maxLevel, 1, -1
-            freezingTemp = ocn_freezing_temperature(tracers(indexSalinity, k, iCell), &
-                                                    pressure=0.0_RKIND, &
-                                                    inLandIceCavity=.false.)
+            freezingTemp = ocn_freezing_temperature(tracers(indexSalinity, k, iCell))
             ! availableEnergyChange is:
             !     positive when frazil ice is formed
             !     negative when frazil ice can be melted
-            availableEnergyChange = rho_sw * cp_sw * layerThickness(k, iCell) &
+            availableEnergyChange = config_density0 * cp_sw * layerThickness(k, iCell) &
                                       * (freezingTemp - tracers(indexTemperature, k, iCell))
 
             ! energyChange is capped when negative.
@@ -159,9 +155,9 @@ contains
             energyChange = max(availableEnergyChange, -netEnergyChange)
 
             ! Compute temperature change in ocean cell due to energy change
-            temperatureChange = energyChange / ( rho_sw * cp_sw * layerThickness(k, iCell) )
+            temperatureChange = energyChange / ( config_density0 * cp_sw * layerThickness(k, iCell) )
             ! Compute thickness change in ocean cell due to energy change
-            thicknessChange = energyChange / ( rho_sw * latent_heat_fusion_mks )
+            thicknessChange = energyChange / ( config_density0 * latent_heat_fusion_mks )
             ! Compute thickness change in sea ice due to energy change
             iceThicknessChange = energyChange / ( density_ice * latent_heat_fusion_mks )
 
@@ -169,11 +165,11 @@ contains
             do iTracer = 1, nTracers
                if(iTracer /= indexTemperature) then
                   ! computed as:
-                  !    \rho_{ocn} h_{ocn}^{pre} \theta_{ocn}^{pre} =
+                  !    \rho_{ocn} h_{ocn}^{pre} \theta_{ocn}^{pre} = 
                   !               \rho_{ocn}^{new} h_{ocn}^{new} \theta_{ocn}^{new}  =  \rho_{si} h_{si} \theta_{si}
-                  tracers(iTracer, k, iCell) = ( rho_sw * layerThickness(k,iCell) * tracers(iTracer, k, iCell) &
+                  tracers(iTracer, k, iCell) = ( config_density0 * layerThickness(k,iCell) * tracers(iTracer, k, iCell) &
                                                - density_ice * iceThicknessChange * iceTracer(iTracer)) / &
-                                               (rho_sw * (layerThickness(k,iCell) + thicknessChange))
+                                               (config_density0 * (layerThickness(k,iCell) + thicknessChange))
                end if
             end do
 
@@ -197,13 +193,11 @@ contains
             k = 1
 
             netEnergychange = 0.0_RKIND
-            freezingTemp = ocn_freezing_temperature(tracers(indexSalinity, k, iCell), &
-                                                    pressure=0.0_RKIND, &
-                                                    inLandIceCavity=.false.)
+            freezingTemp = ocn_freezing_temperature(tracers(indexSalinity, k, iCell))
             ! availableEnergyChange is:
             !     positive when frazil ice is formed
             !     negative when frazil ice can be melted
-            availableEnergyChange = rho_sw * cp_sw * layerThickness(k, iCell) &
+            availableEnergyChange = config_density0 * cp_sw * layerThickness(k, iCell) &
                                       * (freezingTemp - tracers(indexTemperature, k, iCell))
 
             ! energyChange is capped when negative.
@@ -213,9 +207,9 @@ contains
             energyChange = max(availableEnergyChange, -seaIceEnergy(iCell))
 
             ! Compute temperature change in ocean cell due to energy change
-            temperatureChange = energyChange / ( rho_sw * cp_sw * layerThickness(k, iCell) )
+            temperatureChange = energyChange / ( config_density0 * cp_sw * layerThickness(k, iCell) )
             ! Compute thickness change in ocean cell due to energy change
-            thicknessChange = energyChange / ( rho_sw * latent_heat_fusion_mks )
+            thicknessChange = energyChange / ( config_density0 * latent_heat_fusion_mks )
             ! Compute thickness change in sea ice due to energy change
             iceThicknessChange = energyChange / ( density_ice * latent_heat_fusion_mks )
 
@@ -223,11 +217,11 @@ contains
             do iTracer = 1, nTracers
                if(iTracer /= indexTemperature) then
                   ! computed as:
-                  !    \rho_{ocn} h_{ocn}^{pre} \theta_{ocn}^{pre} =
+                  !    \rho_{ocn} h_{ocn}^{pre} \theta_{ocn}^{pre} = 
                   !               \rho_{ocn}^{new} h_{ocn}^{new} \theta_{ocn}^{new}  =  \rho_{si} h_{si} \theta_{si}
-                  tracers(iTracer, k, iCell) = ( rho_sw * layerThickness(k,iCell) * tracers(iTracer, k, iCell) &
+                  tracers(iTracer, k, iCell) = ( config_density0 * layerThickness(k,iCell) * tracers(iTracer, k, iCell) &
                                                - density_ice * iceThicknessChange * iceTracer(iTracer)) / &
-                                               (rho_sw * (layerThickness(k,iCell) + thicknessChange))
+                                               (config_density0 * (layerThickness(k,iCell) + thicknessChange))
                end if
             end do
 
@@ -241,11 +235,29 @@ contains
             seaIceEnergy(iCell) = seaIceEnergy(iCell) + energyChange
          end if
       end do
-      !$omp end do
 
       deallocate(iceTracer)
 
    end subroutine ocn_sea_ice_formation!}}}
+
+!***********************************************************************
+!
+!  function ocn_freezing_temperature
+!
+!> \brief   Computes the freezing temperature of the ocean.
+!> \author  Doug Jacobsen
+!> \date    08/29/2013
+!> \details 
+!>  This routine computes the freezing temperature of the ocean at a given
+!>  salinity value.
+!
+!-----------------------------------------------------------------------
+    real (kind=RKIND) function ocn_freezing_temperature(salinity)!{{{
+      real (kind=RKIND) :: salinity !< Input: Salinity value of water for freezing temperature
+
+      ocn_freezing_temperature = -1.8
+    end function ocn_freezing_temperature!}}}
+
 
 !***********************************************************************
 !
@@ -254,7 +266,7 @@ contains
 !> \brief   Initializes ocean sea ice module.
 !> \author  Doug Jacobsen
 !> \date    08/19/2013
-!> \details
+!> \details 
 !>  This routine initializes the ocean sea ice module and variables..
 !
 !-----------------------------------------------------------------------
@@ -264,17 +276,16 @@ contains
       integer, intent(in) :: nVertLevels !< Input: Number of vertical levels suggested for level cap
       integer, intent(out) :: err !< Output: error flag
 
-      logical, pointer :: config_use_frazil_ice_formation, config_monotonic, config_frazil_in_open_ocean
+      logical, pointer :: config_frazil_ice_formation, config_monotonic
 
       err = 0
 
-      call mpas_pool_get_config(ocnConfigs, 'config_use_frazil_ice_formation', config_use_frazil_ice_formation)
-      call mpas_pool_get_config(ocnConfigs, 'config_frazil_in_open_ocean', config_frazil_in_open_ocean)
+      call mpas_pool_get_config(ocnConfigs, 'config_frazil_ice_formation', config_frazil_ice_formation)
       call mpas_pool_get_config(ocnConfigs, 'config_monotonic', config_monotonic)
 
       frazilFormationOn = .false.
 
-      if(config_use_frazil_ice_formation .and. config_frazil_in_open_ocean) then
+      if(config_frazil_ice_formation) then
         frazilFormationOn = .true.
       end if
 

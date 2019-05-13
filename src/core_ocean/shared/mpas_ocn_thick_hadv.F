@@ -13,14 +13,13 @@
 !> \author Doug Jacobsen
 !> \date   16 September 2011
 !> \details
-!>  This module contains the routine for computing
+!>  This module contains the routine for computing 
 !>  tendencies for thickness from horizontal advection
 !
 !-----------------------------------------------------------------------
 
 module ocn_thick_hadv
 
-   use mpas_timer
    use mpas_derived_types
    use mpas_pool_routines
    use ocn_constants
@@ -49,7 +48,7 @@ module ocn_thick_hadv
    ! Private module variables
    !
    !--------------------------------------------------------------------
-
+   
    logical :: thickHadvOn
 
 !***********************************************************************
@@ -63,7 +62,7 @@ contains
 !> \brief   Computes tendency term from horizontal advection of thickness
 !> \author  Doug Jacobsen
 !> \date    15 September 2011
-!> \details
+!> \details 
 !>  This routine computes the horizontal advection tendency for
 !>  thicknes based on current state and user choices of forcings.
 !
@@ -109,9 +108,8 @@ contains
       !
       !-----------------------------------------------------------------
 
-      integer :: iEdge, cell1, cell2, k, i, iCell, nCells
-      integer, pointer :: nVertLevels
-      integer, dimension(:), pointer :: nCellsArray
+      integer :: iEdge, cell1, cell2, k, i, iCell 
+      integer, pointer :: nCells, nEdges, nVertLevels
 
       integer, dimension(:), pointer :: maxLevelEdgeBot, MaxLevelCell, nEdgesOnCell
       integer, dimension(:,:), pointer :: cellsOnEdge, edgesOnCell, edgeSignOnCell
@@ -122,7 +120,7 @@ contains
       !-----------------------------------------------------------------
       !
       ! call relevant routines for computing tendencies
-      ! note that the user can choose multiple options and the
+      ! note that the user can choose multiple options and the 
       !   tendencies will be added together
       !
       !-----------------------------------------------------------------
@@ -131,9 +129,8 @@ contains
 
       if(.not.thickHadvOn) return
 
-      call mpas_timer_start("thick hadv")
-
-      call mpas_pool_get_dimension(meshPool, 'nCellsArray', nCellsArray)
+      call mpas_pool_get_dimension(meshPool, 'nEdges', nEdges)
+      call mpas_pool_get_dimension(meshPool, 'nCells', nCells)
       call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
 
       call mpas_pool_get_array(meshPool, 'maxLevelCell', maxLevelCell)
@@ -146,11 +143,8 @@ contains
       call mpas_pool_get_array(meshPool, 'edgesOnCell', edgesOnCell)
       call mpas_pool_get_array(meshPool, 'edgeSignOnCell', edgeSignOnCell)
 
-      nCells = nCellsArray( 1 )
-
-      !$omp do schedule(runtime) private(invAreaCell, i, iEdge, k, flux)
       do iCell = 1, nCells
-        invAreaCell = 1.0_RKIND / areaCell(iCell)
+        invAreaCell = 1.0 / areaCell(iCell)
         do i = 1, nEdgesOnCell(iCell)
           iEdge = edgesOnCell(i, iCell)
           do k = 1, maxLevelEdgeBot(iEdge)
@@ -159,9 +153,6 @@ contains
           end do
         end do
       end do
-      !$omp end do
-
-      call mpas_timer_stop("thick hadv")
 
    !--------------------------------------------------------------------
 
@@ -174,9 +165,9 @@ contains
 !> \brief   Initializes ocean horizontal thickness advection
 !> \author  Doug Jacobsen
 !> \date    16 September 2011
-!> \details
-!>  This routine initializes quantities related to horizontal thickness
-!>  advection in the ocean.
+!> \details 
+!>  This routine initializes quantities related to horizontal thickness 
+!>  advection in the ocean. 
 !
 !-----------------------------------------------------------------------
 
