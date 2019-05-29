@@ -6,7 +6,10 @@
 !   * calculated the dry hydrostatic pressure using the dry air density.
 !   * added outputs of the vertical diffusivity coefficients.
 !     Laura D. Fowler (laura@ucar.edu) / 2016-10-26.
-
+! 
+!YSU module enabled for GPU execution by the Korean Institute for Science and
+! Technology Information. Work performed by Jae Youp Kim, Ji-Sun Kang, and Minsu
+! Joh at KISTI / commited 2018-10-15 
 !=================================================================================================================
 !WRF:model_layer:physics
 !
@@ -228,12 +231,26 @@ contains
                                                                         dvsfc, &
                                                                         dtsfc, &
                                                                         dqsfc
+
 #if defined(mpas)
 !MPAS specific optional arguments for additional diagnostics:
    real,intent(in),dimension(ims:ime,kms:kme,jms:jme),optional:: rho
    real:: rho_d
    real,intent(out),dimension(ims:ime,kms:kme,jms:jme),optional:: kzhout,kzmout,kzqout
+#endif
+
+!$acc data pcopyin(qv3d, qc3d, qi3d, p3d, pi3d, th3d, t3d, dz8w, rthraten, p3di,  &
+!$acc              uoce, voce, xland, hfx, qfx, br, psfc, psim, psih, u3d, v3d,   &
+!$acc              flag_qi, znu, znw, mut, ctopo, ctopo2, rho)                    &
+!$acc        pcopy(rublten, rvblten, rthblten, rqvblten, rqcblten, exch_h, wstar, &
+!$acc              delta, u10, v10, znt, ust, hpbl, wspd, regime, rqiblten)       &
+!$acc     pcopyout(kpbl2d, kzhout, kzmout, kzqout)                                &
+!$acc      pcreate(rqvbl2dt, qv2d, pdh, pdhi, dusfc, dvsfc, dtsfc, dqsfc)
+
+ 
+#if defined(mpas)
    do j = jts,jte
+!$acc kernels
    do k = kts,kte
    do i = its,ite
       kzhout(i,k,j) = 0.
@@ -241,29 +258,35 @@ contains
       kzqout(i,k,j) = 0.
    enddo
    enddo
+!$acc end kernels
    enddo
 !MPAS specific end.
 #endif
 
 !
+!$acc kernels
    qv2d(its:ite,:) = 0.0
+!$acc end kernels
 !
    do j = jts,jte
      if(present(mut))then
 !
 ! For ARW we will replace p and p8w with dry hydrostatic pressure
 !
+!$acc kernels
         do k = kts,kte+1
           do i = its,ite
              if(k.le.kte)pdh(i,k) = mut(i,j)*znu(k) + p_top
              pdhi(i,k) = mut(i,j)*znw(k) + p_top
           enddo
         enddo
+!$acc end kernels
       elseif(present(rho)) then
   203 format(1x,i4,1x,i2,10(1x,e15.8))
 !For MPAS, we replace the hydrostatic pressures defined at theta and w points by
 !the dry hydrostatic pressures (Laura D. Fowler):
         k = kte+1
+!$acc kernels
         do i = its,ite
            pdhi(i,k) = p3di(i,k,j)
         enddo
@@ -278,22 +301,35 @@ contains
            pdh(i,k) = 0.5*(pdhi(i,k) + pdhi(i,k+1))
         enddo
         enddo
+!$acc end kernels
 !MPAS specific end.
       else
+!$acc kernels
         do k = kts,kte+1
           do i = its,ite
             if(k.le.kte)pdh(i,k) = p3d(i,k,j)
             pdhi(i,k) = p3di(i,k,j)
           enddo
         enddo
+!$acc end kernels
       endif
+!$acc kernels
       do k = kts,kte
         do i = its,ite
           qv2d(i,k) = qv3d(i,k,j)
           qv2d(i,k+kte) = qc3d(i,k,j)
-          if(present(rqiblten)) qv2d(i,k+kte+kte) = qi3d(i,k,j)
         enddo
       enddo
+!$acc end kernels
+      if(present(rqiblten)) then
+!$acc kernels
+      do k = kts,kte
+        do i = its,ite
+          qv2d(i,k+kte+kte) = qi3d(i,k,j)
+        enddo
+      enddo
+!$acc end kernels
+      end if
 !
       call ysu2d(J=j,ux=u3d(ims,kms,j),vx=v3d(ims,kms,j)                       &
               ,tx=t3d(ims,kms,j)                                               &
@@ -331,18 +367,33 @@ contains
               ,ids=ids,ide=ide, jds=jds,jde=jde, kds=kds,kde=kde               &
               ,ims=ims,ime=ime, jms=jms,jme=jme, kms=kms,kme=kme               &
               ,its=its,ite=ite, jts=jts,jte=jte, kts=kts,kte=kte   )
+
 !
+!$acc kernels
      do k = kts,kte
        do i = its,ite
          rthblten(i,k,j) = rthblten(i,k,j)/pi3d(i,k,j)
          rqvblten(i,k,j) = rqvbl2dt(i,k)
          rqcblten(i,k,j) = rqvbl2dt(i,k+kte)
-         if(present(rqiblten)) rqiblten(i,k,j) = rqvbl2dt(i,k+kte+kte)
        enddo
      enddo
+!$acc end kernels
+     if(present(rqiblten)) then
+!$acc kernels
+       do k = kts,kte
+         do i = its,ite
+           rqiblten(i,k,j) = rqvbl2dt(i,k+kte+kte)
+         enddo
+       enddo
+!$acc end kernels
+     end if
 !
    enddo
+
+
+!$acc end data
 !
+
    end subroutine ysu
 !
 !-------------------------------------------------------------------------------
@@ -605,7 +656,7 @@ contains
    real    ::  prnumfac,bfx0,hfx0,qfx0,delb,dux,dvx,                           &
                dsdzu,dsdzv,wm3,dthx,dqx,wspd10,ross,tem1,dsig,tvcon,conpr,     &
                prfac,prfac2,phim8z,radsum,tmp1,templ,rvls,temps,ent_eff,    &
-               rcldb,bruptmp,radflux
+               rcldb,bruptmp,radflux, qtnp_reg, xkzh_reg, xkzm_reg, xkzq_reg
 !
 #if defined(mpas)
 !MPAS specific begin:
@@ -630,6 +681,22 @@ contains
    ktrace2 = 0 + kte
    ktrace3 = 0 + kte*2
 !
+!$acc data pcopyin(dz8w2d, pi2d, p2diorg, tx, qx, p2di, p2d,&
+!$acc              xland, hfx, qfx, br, psim, psih, psfcpa, ux,  &
+!$acc              vx, rthraten, ctopo, ctopo2, uox, vox) &
+!$acc        pcopy(utnp, vtnp, ttnp, qtnp, ust, hpbl, znt, wspd, &
+!$acc              regime, exch_hx, u10, v10, wstar, delta) &
+!$acc     pcopyout(kpbl1d, kzh, kzm, kzq) &
+!$acc      pcreate(hol, zq, thx, thvx, thlix, del, dza, dzq, xkzom, za, &
+!$acc              rhox, govrth, zl1, thermal, hgamt, hgamq, brdn, brup,&
+!$acc              phim, phih, dusfc, dvsfc, dtsfc, dqsfc, prpbl, wspd1,&
+!$acc              thermalli, xkzm, xkzh, f1, f2, r1, r2, ad, au, cu,al,&
+!$acc              xkzq, zfac, rhox2, hgamt2, brcr, sflux, zol1, brcr_sbro,&
+!$acc              r3, f3, kpbl, kpblold, pblflg, sfcflg, stable, cloudflg,&
+!$acc              wscalek, wscalek2, xkzml, xkzhl, zfacent, entfac, ust3, &
+!$acc              wstar3, wstar3_2, hgamu, hgamv, wm2, we, bfxpbl, hfxpbl,&
+!$acc              qfxpbl, ufxpbl, vfxpbl, dthvx, xkzoh, wscale)
+!$acc kernels
    do k = kts,kte
      do i = its,ite
        thx(i,k) = tx(i,k)/pi2d(i,k)
@@ -715,9 +782,11 @@ contains
      delta(i)  = 0.0
      wstar3_2(i) =  0.0
    enddo
+!$acc end kernels
 !
 !MPAS specific begin: Added initialization of local vertical diffusion coefficients:
    if(present(kzh) .and. present(kzm) .and. present(kzq)) then
+!$acc kernels
       do k = kts,kte
       do i = its,ite
          xkzh(i,k)  = 0.0
@@ -726,9 +795,11 @@ contains
          xkzml(i,k) = 0.0
       enddo
       enddo
+!$acc end kernels
    endif
 !MPAS specific end.
 !
+!$acc kernels
    do k = kts,klpbl
      do i = its,ite
        wscalek(i,k) = 0.0
@@ -1203,31 +1274,44 @@ contains
 !
    do k = kts,kte-1
      do i = its,ite
+       xkzh_reg = xkzh(i,k)
        dtodsd = dt2/del(i,k)
        dtodsu = dt2/del(i,k+1)
        dsig   = p2d(i,k)-p2d(i,k+1)
        rdz    = 1./dza(i,k+1)
-       tem1   = dsig*xkzh(i,k)*rdz
+       tem1   = dsig*xkzh_reg*rdz
+       f1(i,k+1) = thx(i,k+1)-300.
        if(pblflg(i).and.k.lt.kpbl(i)) then
-         dsdzt = tem1*(-hgamt(i)/hpbl(i)-hfxpbl(i)*zfacent(i,k)/xkzh(i,k))
-         f1(i,k)   = f1(i,k)+dtodsd*dsdzt
+         dsdzt = tem1*(-hgamt(i)/hpbl(i)-hfxpbl(i)*zfacent(i,k)/xkzh_reg)
          f1(i,k+1) = thx(i,k+1)-300.-dtodsu*dsdzt
        elseif(pblflg(i).and.k.ge.kpbl(i).and.entfac(i,k).lt.4.6) then
-         xkzh(i,k) = -we(i)*dza(i,kpbl(i))*exp(-entfac(i,k))
-         xkzh(i,k) = sqrt(xkzh(i,k)*xkzhl(i,k))
-         xkzh(i,k) = max(xkzh(i,k),xkzoh(i,k))
-         xkzh(i,k) = min(xkzh(i,k),xkzmax)
-         f1(i,k+1) = thx(i,k+1)-300.
-       else
-         f1(i,k+1) = thx(i,k+1)-300.
+         xkzh_reg = -we(i)*dza(i,kpbl(i))*exp(-entfac(i,k))
+         xkzh_reg = sqrt(xkzh_reg*xkzhl(i,k))
+         xkzh_reg = max(xkzh_reg,xkzoh(i,k))
+         xkzh_reg = min(xkzh_reg,xkzmax)
        endif
-       tem1   = dsig*xkzh(i,k)*rdz
+       tem1   = dsig*xkzh_reg*rdz
        dsdz2     = tem1*rdz
        au(i,k)   = -dtodsd*dsdz2
        al(i,k)   = -dtodsu*dsdz2
-       ad(i,k)   = ad(i,k)-au(i,k)
        ad(i,k+1) = 1.-al(i,k)
-       exch_hx(i,k+1) = xkzh(i,k)
+       exch_hx(i,k+1) = xkzh_reg
+       xkzh(i,k) = xkzh_reg
+     enddo
+   enddo
+!
+   do k = kts,kte-1
+     do i = its,ite
+       xkzh_reg = xkzh(i,k)
+       dtodsd = dt2/del(i,k)
+       dsig   = p2d(i,k)-p2d(i,k+1)
+       rdz    = 1./dza(i,k+1)
+       tem1   = dsig*xkzh_reg*rdz
+       if(pblflg(i).and.k.lt.kpbl(i)) then
+         dsdzt = tem1*(-hgamt(i)/hpbl(i)-hfxpbl(i)*zfacent(i,k)/xkzh_reg)
+         f1(i,k)   = f1(i,k)+dtodsd*dsdzt
+       endif
+       ad(i,k)   = ad(i,k)-au(i,k)
      enddo
    enddo
 !
@@ -1239,11 +1323,13 @@ contains
        r1(i,k) = f1(i,k)
      enddo
    enddo
+!$acc end kernels
 !
    call tridin_ysu(al,ad,cu,r1,au,f1,its,ite,kts,kte,1)
 !
 !     recover tendencies of heat
 !
+!$acc kernels
    do k = kte,kts,-1
      do i = its,ite
        ttend = (f1(i,k)-thx(i,k)+300.)*rdt*pi2d(i,k)
@@ -1294,43 +1380,59 @@ contains
 !
    do k = kts,kte-1
      do i = its,ite
+       xkzq_reg = xkzq(i,k)
        dtodsd = dt2/del(i,k)
        dtodsu = dt2/del(i,k+1)
        dsig   = p2d(i,k)-p2d(i,k+1)
        rdz    = 1./dza(i,k+1)
-       tem1   = dsig*xkzq(i,k)*rdz
+       tem1   = dsig*xkzq_reg*rdz
+       f3(i,k+1,1) = qx(i,k+1)
        if(pblflg(i).and.k.lt.kpbl(i)) then
-         dsdzq = tem1*(-qfxpbl(i)*zfacent(i,k)/xkzq(i,k))
-         f3(i,k,1) = f3(i,k,1)+dtodsd*dsdzq
+         dsdzq = tem1*(-qfxpbl(i)*zfacent(i,k)/xkzq_reg)
          f3(i,k+1,1) = qx(i,k+1)-dtodsu*dsdzq
        elseif(pblflg(i).and.k.ge.kpbl(i).and.entfac(i,k).lt.4.6) then
-         xkzq(i,k) = -we(i)*dza(i,kpbl(i))*exp(-entfac(i,k))
-         xkzq(i,k) = sqrt(xkzq(i,k)*xkzhl(i,k))
-         xkzq(i,k) = max(xkzq(i,k),xkzoh(i,k))
-         xkzq(i,k) = min(xkzq(i,k),xkzmax)
-         f3(i,k+1,1) = qx(i,k+1)
-       else
-         f3(i,k+1,1) = qx(i,k+1)
+         xkzq_reg = -we(i)*dza(i,kpbl(i))*exp(-entfac(i,k))
+         xkzq_reg = sqrt(xkzq_reg*xkzhl(i,k))
+         xkzq_reg = max(xkzq_reg,xkzoh(i,k))
+         xkzq_reg = min(xkzq_reg,xkzmax)
        endif
-       tem1   = dsig*xkzq(i,k)*rdz
+       tem1   = dsig*xkzq_reg*rdz
        dsdz2     = tem1*rdz
        au(i,k)   = -dtodsd*dsdz2
        al(i,k)   = -dtodsu*dsdz2
-       ad(i,k)   = ad(i,k)-au(i,k)
        ad(i,k+1) = 1.-al(i,k)
-!      exch_hx(i,k+1) = xkzh(i,k)
+       xkzq(i,k) = xkzq_reg
+     enddo
+   enddo
+!
+   do k = kts,kte-1
+     do i = its,ite
+       xkzq_reg = xkzq(i,k)
+       dtodsd = dt2/del(i,k)
+       dsig   = p2d(i,k)-p2d(i,k+1)
+       rdz    = 1./dza(i,k+1)
+       tem1   = dsig*xkzq_reg*rdz
+       if(pblflg(i).and.k.lt.kpbl(i)) then
+         dsdzq = tem1*(-qfxpbl(i)*zfacent(i,k)/xkzq_reg)
+         f3(i,k,1) = f3(i,k,1)+dtodsd*dsdzq
+       endif
+       ad(i,k)   = ad(i,k)-au(i,k)
      enddo
    enddo
 !
    if(ndiff.ge.2) then
-     do ic = 2,ndiff
-       is = (ic-1) * kte
+       is = (2-1) * kte
        do k = kts,kte-1
          do i = its,ite
-           f3(i,k+1,ic) = qx(i,k+1+is)
+           f3(i,k+1,2) = qx(i,k+1+is)
          enddo
        enddo
-     enddo
+       is = (3-1) * kte
+       do k = kts,kte-1
+         do i = its,ite
+           f3(i,k+1,3) = qx(i,k+1+is)
+         enddo
+       enddo
    endif
 !
 ! copies here to avoid duplicate input args for tridin
@@ -1348,6 +1450,7 @@ contains
        enddo
      enddo
    enddo
+!$acc end kernels
 !
 !     solve tridiagonal problem for moisture, clouds, and gases
 !
@@ -1355,6 +1458,7 @@ contains
 !
 !     recover tendencies of heat and moisture
 !
+!$acc kernels
    do k = kte,kts,-1
      do i = its,ite
        qtend = (f3(i,k,1)-qx(i,k))*rdt
@@ -1362,21 +1466,34 @@ contains
        dqsfc(i) = dqsfc(i)+qtend*conq*del(i,k)
      enddo
    enddo
+!$acc end kernels
 !
    if(ndiff.ge.2) then
-     do ic = 2,ndiff
-       is = (ic-1) * kte
+!$acc kernels
+!     do ic = 2,ndiff
+       is = (2-1) * kte
        do k = kte,kts,-1
          do i = its,ite
-           qtend = (f3(i,k,ic)-qx(i,k+is))*rdt
-           qtnp(i,k+is) = qtnp(i,k+is)+qtend
+           qtend = (f3(i,k,2)-qx(i,k+is))*rdt
+           qtnp_reg = qtnp(i,k+is)
+           qtnp(i,k+is) = qtnp_reg+qtend
          enddo
        enddo
-     enddo
+       is = (3-1) * kte
+       do k = kte,kts,-1
+         do i = its,ite
+           qtend = (f3(i,k,3)-qx(i,k+is))*rdt
+           qtnp_reg = qtnp(i,k+is)
+           qtnp(i,k+is) = qtnp_reg+qtend
+         enddo
+       enddo
+!     enddo
+!$acc end kernels
    endif
 !
 !     compute tridiagonal matrix elements for momentum
 !
+!$acc kernels
    do i = its,ite
      do k = kts,kte
        au(i,k) = 0.
@@ -1386,52 +1503,75 @@ contains
        f2(i,k) = 0.
      enddo
    enddo
+!$acc end kernels
 !
-   do i = its,ite
 ! paj: ctopo=1 if topo_wind=0 (default)
 ! mchen add this line to make sure NMM can still work with YSU PBL
-     if(present(ctopo)) then
+   if(present(ctopo)) then
+!$acc kernels
+     do i = its,ite
        ad(i,1) = 1.+ctopo(i)*ust(i)**2/wspd1(i)*rhox(i)*g/del(i,1)*dt2         &
         *(wspd1(i)/wspd(i))**2
-     else
+     enddo
+!$acc end kernels
+   else
+!$acc kernels
+     do i = its,ite
        ad(i,1) = 1.+ust(i)**2/wspd1(i)*rhox(i)*g/del(i,1)*dt2                  &
         *(wspd1(i)/wspd(i))**2
-     endif
+     enddo
+!$acc end kernels
+   endif
+!$acc kernels
+   do i = its,ite
      f1(i,1) = ux(i,1)+uox(i)*ust(i)**2*g/del(i,1)*dt2/wspd1(i)
      f2(i,1) = vx(i,1)+vox(i)*ust(i)**2*g/del(i,1)*dt2/wspd1(i)
    enddo
 !
    do k = kts,kte-1
      do i = its,ite
+       xkzm_reg = xkzm(i,k)
        dtodsd = dt2/del(i,k)
        dtodsu = dt2/del(i,k+1)
        dsig   = p2d(i,k)-p2d(i,k+1)
        rdz    = 1./dza(i,k+1)
-       tem1   = dsig*xkzm(i,k)*rdz
+       tem1   = dsig*xkzm_reg*rdz
+       f1(i,k+1) = ux(i,k+1)
+       f2(i,k+1) = vx(i,k+1)
        if(pblflg(i).and.k.lt.kpbl(i))then
-         dsdzu     = tem1*(-hgamu(i)/hpbl(i)-ufxpbl(i)*zfacent(i,k)/xkzm(i,k))
-         dsdzv     = tem1*(-hgamv(i)/hpbl(i)-vfxpbl(i)*zfacent(i,k)/xkzm(i,k))
-         f1(i,k)   = f1(i,k)+dtodsd*dsdzu
-         f1(i,k+1) = ux(i,k+1)-dtodsu*dsdzu
-         f2(i,k)   = f2(i,k)+dtodsd*dsdzv
-         f2(i,k+1) = vx(i,k+1)-dtodsu*dsdzv
+         dsdzu     = tem1*(-hgamu(i)/hpbl(i)-ufxpbl(i)*zfacent(i,k)/xkzm_reg)
+         dsdzv     = tem1*(-hgamv(i)/hpbl(i)-vfxpbl(i)*zfacent(i,k)/xkzm_reg)
+         f1(i,k+1) = f1(i,k+1)-dtodsu*dsdzu
+         f2(i,k+1) = f2(i,k+1)-dtodsu*dsdzv
        elseif(pblflg(i).and.k.ge.kpbl(i).and.entfac(i,k).lt.4.6) then
-         xkzm(i,k) = prpbl(i)*xkzh(i,k)
-         xkzm(i,k) = sqrt(xkzm(i,k)*xkzml(i,k))
-         xkzm(i,k) = max(xkzm(i,k),xkzom(i,k))
-         xkzm(i,k) = min(xkzm(i,k),xkzmax)
-         f1(i,k+1) = ux(i,k+1)
-         f2(i,k+1) = vx(i,k+1)
-       else
-         f1(i,k+1) = ux(i,k+1)
-         f2(i,k+1) = vx(i,k+1)
+         xkzm_reg = prpbl(i)*xkzh(i,k)
+         xkzm_reg = sqrt(xkzm_reg*xkzml(i,k))
+         xkzm_reg = max(xkzm_reg,xkzom(i,k))
+         xkzm_reg = min(xkzm_reg,xkzmax)
        endif
-       tem1   = dsig*xkzm(i,k)*rdz
+       tem1   = dsig*xkzm_reg*rdz
        dsdz2     = tem1*rdz
        au(i,k)   = -dtodsd*dsdz2
        al(i,k)   = -dtodsu*dsdz2
-       ad(i,k)   = ad(i,k)-au(i,k)
        ad(i,k+1) = 1.-al(i,k)
+       xkzm(i,k) = xkzm_reg
+     enddo
+   enddo
+!
+   do k = kts,kte-1
+     do i = its,ite
+       xkzm_reg = xkzm(i,k)
+       dtodsd = dt2/del(i,k)
+       dsig   = p2d(i,k)-p2d(i,k+1)
+       rdz    = 1./dza(i,k+1)
+       tem1   = dsig*xkzm_reg*rdz
+       if(pblflg(i).and.k.lt.kpbl(i))then
+         dsdzu     = tem1*(-hgamu(i)/hpbl(i)-ufxpbl(i)*zfacent(i,k)/xkzm_reg)
+         dsdzv     = tem1*(-hgamv(i)/hpbl(i)-vfxpbl(i)*zfacent(i,k)/xkzm_reg)
+         f1(i,k)   = f1(i,k)+dtodsd*dsdzu
+         f2(i,k)   = f2(i,k)+dtodsd*dsdzv
+       endif
+       ad(i,k)   = ad(i,k)-au(i,k)
      enddo
    enddo
 !
@@ -1444,6 +1584,7 @@ contains
        r2(i,k) = f2(i,k)
      enddo
    enddo
+!$acc end kernels
 !
 !     solve tridiagonal problem for momentum
 !
@@ -1451,6 +1592,7 @@ contains
 !
 !     recover tendencies of momentum
 !
+!$acc kernels
    do k = kte,kts,-1
      do i = its,ite
        utend = (f1(i,k)-ux(i,k))*rdt
@@ -1461,24 +1603,30 @@ contains
        dvsfc(i) = dvsfc(i) + vtend*conwrc*del(i,k)
      enddo
    enddo
+!$acc end kernels
 !
 ! paj: ctopo2=1 if topo_wind=0 (default)
 !
-   do i = its,ite
-     if(present(ctopo).and.present(ctopo2)) then ! mchen for NMM
+   if(present(ctopo).and.present(ctopo2)) then ! mchen for NMM
+!$acc kernels
+     do i = its,ite
        u10(i) = ctopo2(i)*u10(i)+(1-ctopo2(i))*ux(i,1)
        v10(i) = ctopo2(i)*v10(i)+(1-ctopo2(i))*vx(i,1)
-     endif !mchen
-   enddo
+     enddo
+!$acc end kernels
+   endif !mchen
 !
 !---- end of vertical diffusion
 !
+!$acc kernels
    do i = its,ite
      kpbl1d(i) = kpbl(i)
    enddo
+!$acc end kernels
 !
 !MPAS specific begin:
    if(present(kzh) .and. present(kzm) .and. present(kzq)) then
+!$acc kernels
       do i = its,ite
       do k = kts,kte
          kzh(i,k) = xkzh(i,k)
@@ -1486,8 +1634,10 @@ contains
          kzq(i,k) = xkzq(i,k)
       enddo
       enddo
+!$acc end kernels
    endif
 !MPAS specific end.
+!$acc end data
 !
    end subroutine ysu2d
 !-------------------------------------------------------------------------------
@@ -1524,6 +1674,8 @@ contains
    l = ite
    n = kte
 !
+!$acc data pcopy(cl, cm, r1, r2, au, cu, f1, f2)
+!$acc kernels
    do i = its,l
      fk = 1./cm(i,1)
      au(i,1) = fk*cu(i,1)
@@ -1579,6 +1731,8 @@ contains
        enddo
      enddo
    enddo
+!$acc end kernels
+!$acc end data
 !
    end subroutine tridi1n
 !-------------------------------------------------------------------------------
@@ -1613,6 +1767,8 @@ contains
    l = ite
    n = kte
 !
+!$acc data pcopy(cl, cm, r2, au, cu, f2)
+!$acc kernels
    do it = 1,nt
      do i = its,l
        fk = 1./cm(i,1)
@@ -1645,6 +1801,8 @@ contains
        enddo
      enddo
    enddo
+!$acc end kernels
+!$acc end data
 !
    end subroutine tridin_ysu
 !-------------------------------------------------------------------------------
