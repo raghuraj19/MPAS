@@ -363,14 +363,14 @@
                            config_pbl_scheme, config_convection_scheme, config_radt_lw_scheme, config_radt_sw_scheme, &
                            index_qv, index_qc, index_qr, index_qi, index_qs, index_ni, &
                            rublten, rvblten, mass_edge, rublten_Edge, &
-                           tend_ru_physics, &
+                           tend_ru_physics, &  ! change for addtend for u
                            rucuten, rvcuten, rucuten_Edge, &
                            tend_th, tend_scalars, mass, rthblten, rqvblten, rqcblten, rqiblten, rniblten, &
                            rthcuten, rqvcuten, rqccuten, rqrcuten, rqicuten, rqscuten, &
                            rthratenlw, rthratensw, rthdynten, &
                            tend_u_phys, tend_rtheta_adv, tend_diabatic, &
                            theta_m, scalars, &
-                           tend_rtheta_physics, &
+                           tend_rtheta_physics, &  ! change for addtend for theta_m
                            tend_theta_euler &
                            )
 
@@ -817,7 +817,6 @@
  integer, dimension(:), pointer :: compactHaloInfo
  type (mpas_communication_list), pointer :: sendList => null()
  type (mpas_communication_list), pointer :: recvList => null()
-
  
 !-----------------------------------------------------------------------------------------------------------------
 
@@ -846,8 +845,8 @@
  tempField % isActive = .true.
 
  call mpas_dmpar_compact_halo_info(tempField, compactHaloInfo)
- call mpas_dmpar_exch_halo_acc(Ux_tend, compactHaloInfo, sendList, recvList)
- call mpas_dmpar_exch_halo_acc(Uy_tend, compactHaloInfo, sendList, recvList)
+ call mpas_dmpar_exch_halo(Ux_tend, compactHaloInfo, sendList, recvList)
+ call mpas_dmpar_exch_halo(Uy_tend, compactHaloInfo, sendList, recvList)
  deallocate(compactHaloInfo)
  call mpas_dmpar_destroy_communication_list(sendList)
  call mpas_dmpar_destroy_communication_list(recvList)
