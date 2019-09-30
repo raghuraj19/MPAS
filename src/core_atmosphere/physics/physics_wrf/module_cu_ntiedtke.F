@@ -8,7 +8,8 @@
 ! * added the three corrections available from module_cu_ntiedtke.F available in the WRF github repository Z(not
 !   in the released version WRF 3.8.1.
 !   Laura D. Fowler (laura@ucar.edu) / 2016-10-18.
-
+!ntiedtke enabled for GPU execution by the Korean Institute for Science and Technology Information. 
+! Work performed by Jae Youp Kim, Ji-Sun Kang, and Minsu Joh at KISTI. Committed: 2018-10-15  
 !=================================================================================================================
 !-----------------------------------------------------------------------
 !
@@ -320,18 +321,27 @@ contains
 
 !-------other local variables----
       integer                      :: zz
+
 !-----------------------------------------------------------------------
 !
 !
 !***  check to see if this is a convection timestep
 !
-
-!-----------------------------------------------------------------------
+!$kgen begin_callsite
+!$acc data pcopy(dt, dx, xland, raincv, pratec, cu_act_flag, dz8w, pcps, p8w, &
+!$acc            pi3d, qc3d, qvften, thften, qi3d, qv3d, rho3d, t3d,u3d,v3d,w,&
+!$acc            qfx, hfx,rqccuten,rqicuten,rqvcuten,rthcuten,rucuten,rvcuten)&
+!$acc    pcreate(rn, evap, heatflux, slimsk, prsi, ghti, zi, dot,prsl,q1,&
+!$acc            q2, q3, q1b, t1b, t1, u1, v1,zl,omg,ghtl)
+!$acc kernels
+!$acc loop independent
       do j=jts,jte
+!$acc loop independent
          do i=its,ite
             cu_act_flag(i,j)=.true.
          enddo
       enddo
+!$acc end kernels
 
       im=ite-its+1
       kx=kte-kts+1
@@ -344,36 +354,45 @@ contains
    do j=jts,jte
 
 ! --------------- compute zi and zl -----------------------------------------
+!$acc kernels
+!$acc loop independent
       do i=its,ite
         zi(i,kts)=0.0
       enddo
 !
       do k=kts,kte
+!$acc loop gang vector independent
         do i=its,ite
           zi(i,k+1)=zi(i,k)+dz8w(i,k,j)
         enddo
       enddo
 !
       do k=kts,kte
+!$acc loop gang vector independent
         do i=its,ite
           zl(i,k)=0.5*(zi(i,k)+zi(i,k+1))
         enddo
       enddo
 
 ! --------------- end compute zi and zl -------------------------------------
+!$acc loop independent
       do i=its,ite
         slimsk(i)=int(abs(xland(i,j)-2.))
       enddo
 
+!$acc loop gang vector independent
       do k=kts,kte
         kp=k+1
+!$acc loop gang vector independent
         do i=its,ite
           dot(i,k)=-0.5*g*rho3d(i,k,j)*(w(i,k,j)+w(i,kp,j))
         enddo
       enddo
 
+!$acc loop independent private(zz)
       do k=kts,kte
         zz = kte+1-k
+!$acc loop independent
         do i=its,ite
           u1(i,zz)=u3d(i,k,j)
           v1(i,zz)=v3d(i,k,j)
@@ -394,30 +413,38 @@ contains
         enddo
       enddo
 
+!$acc loop independent private(zz)
       do k=kts,kte+1
         zz = kte+2-k
+!$acc loop independent
         do i=its,ite
           ghti(i,zz) = zi(i,k)
           prsi(i,zz) = p8w(i,k,j) 
         enddo
       enddo
 !
+!$acc loop independent
       do i=its,ite
         evap(i)    = qfx(i,j)
         heatflux(i)= hfx(i,j)
       enddo
+!$acc end kernels
 !
 !########################################################################
       call tiecnvn(u1,v1,t1,q1,q2,q3,q1b,t1b,ghtl,ghti,omg,prsl,prsi,evap,heatflux,  &
                   rn,slimsk,im,kx,kx1,delt,dx)
 
+!$acc kernels
+!$acc loop independent
       do i=its,ite
          raincv(i,j)=rn(i)/stepcu
          pratec(i,j)=rn(i)/(stepcu * dt)
       enddo
 
+!$acc loop independent private(zz)
       do k=kts,kte
         zz = kte+1-k
+!$acc loop independent
         do i=its,ite
           rthcuten(i,k,j)=(t1(i,zz)-t3d(i,k,j))/pi3d(i,k,j)*rdelt
           rqvcuten(i,k,j)=(q1(i,zz)-qv3d(i,k,j))*rdelt
@@ -425,32 +452,42 @@ contains
           rvcuten(i,k,j) =(v1(i,zz)-v3d(i,k,j))*rdelt
         enddo
       enddo
+!$acc end kernels
 
       if(present(rqccuten))then
         if ( f_qc ) then
+!$acc kernels
+!$acc loop independent private(zz)
           do k=kts,kte
             zz = kte+1-k
+!$acc loop independent
             do i=its,ite
               rqccuten(i,k,j)=(q2(i,zz)-qc3d(i,k,j))*rdelt
             enddo
           enddo
+!$acc end kernels
         endif
       endif
 
       if(present(rqicuten))then
         if ( f_qi ) then
+!$acc kernels
+!$acc loop independent private(zz)
           do k=kts,kte
             zz = kte+1-k
+!$acc loop independent
             do i=its,ite
               rqicuten(i,k,j)=(q3(i,zz)-qi3d(i,k,j))*rdelt
             enddo
           enddo
+!$acc end kernels
         endif
       endif
 
 
    enddo
-
+!$acc end data
+!$kgen end_callsite
    end subroutine cu_ntiedtke
 
 !====================================================================
@@ -562,11 +599,19 @@ contains
       integer i,j,k,lq,km,km1
       real dt,ztpp1
       real zew,zqs,zcor
+      real input_tt, foealfa_tt, foeewm_tt
 !
       ztmst=dt
-!
 !  masv flux diagnostics.
 !
+!
+!$acc data pcopy(pu, pv, pt, pqv, pqc, pqi, pqvf, ptf, poz, pzz, pomg, &
+!$acc            pap, paph, evap, hfx, zprecc, lndj,dx) &
+!$acc    pcreate(pum1, pvm1, ztt, ptte, pqte, pvom, pvol, pverv, pgeo, &
+!$acc            pqhfl, zqq, prsfc, pssfc, pcte, phhfl, pgeoh, ztp1,   &
+!$acc            zqp1, ztu, zqu, zlu, zlude, zmfu, zmfd, zqsat, zrain, &
+!$acc            icbot, ictop, ktype, locum)
+!$acc kernels
       do j=1,lq
         zrain(j)=0.0
         locum(j)=.false.
@@ -576,9 +621,10 @@ contains
         phhfl(j)=hfx(j)
         pgeoh(j,km1)=g*pzz(j,km1)
       end do
-!
 !     convert model variables for mflux scheme
 !
+!
+!kimjy error loop
       do k=1,km
         do j=1,lq
           pcte(j,k)=0.0
@@ -592,7 +638,15 @@ contains
           pgeo(j,k)=g*poz(j,k)
           pgeoh(j,k)=g*pzz(j,k)
           tt=ztp1(j,k)
-          zew  = foeewm(tt)                                      
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+          input_tt = tt
+          foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+          foeewm_tt  = c2es *(foealfa_tt*exp(c3les*(input_tt-tmelt)/(input_tt-c4les))+ &
+                       (1.-foealfa_tt)*exp(c3ies*(input_tt-tmelt)/(input_tt-c4ies)))
+!----------------------------------------------------------------------------------------
+          zew  = foeewm_tt                                      
           zqs  = zew/pap(j,k)                                      
           zqs  = min(0.5,zqs)                                         
           zcor = 1./(1.-vtmpc1*zqs)                                    
@@ -603,9 +657,10 @@ contains
           ztt(j,k) =ptte(j,k)
         end do
       end do
-!
+!$acc end kernels
 !-----------------------------------------------------------------------
 !*    2.     call 'cumastrn'(master-routine for cumulus parameterization)
+!
 !
       call cumastrn        &
      &    (lq,       km,       km1,      km-1,    ztp1, &
@@ -616,13 +671,21 @@ contains
      &     ktype,    icbot,    ictop,    ztu,     zqu,  &
      &     zlu,      zlude,    zmfu,     zmfd,    zrain,&
      &     pcte,     phhfl,    lndj,     pgeoh,   dx)
-!
 !     to include the cloud water and cloud ice detrained from convection
 !
+!
+!$acc kernels
       do k=1,km
       do j=1,lq
       if(pcte(j,k).gt.0.) then
-        fliq=foealfa(ztp1(j,k))
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ztp1(j,k)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+        !fliq=foealfa(ztp1(j,k))
+        fliq=foealfa_tt
         fice=1.0-fliq
         pqc(j,k)=pqc(j,k)+fliq*pcte(j,k)*ztmst
         pqi(j,k)=pqi(j,k)+fice*pcte(j,k)*ztmst
@@ -641,15 +704,19 @@ contains
       do j=1,lq
         zprecc(j)=amax1(0.0,(prsfc(j)+pssfc(j))*ztmst)
       end do
+!$acc end kernels
 
       if (lmfdudv) then
+!$acc kernels
         do k=1,km
           do j=1,lq
             pu(j,k)=pu(j,k)+pvom(j,k)*ztmst
             pv(j,k)=pv(j,k)+pvol(j,k)*ztmst
           end do
         end do
+!$acc end kernels
       endif
+!$acc end data
 !
       return
       end subroutine tiecnvn
@@ -672,7 +739,6 @@ contains
      &     plu,      plude,    pmfu,     pmfd,     prain,&
      &     pcte,     phhfl,    lndj,     zgeoh,   dx)
       implicit none
-!
 !***cumastrn*  master routine for cumulus massflux-scheme
 !     m.tiedtke      e.c.m.w.f.      1986/1987/1989
 !     modifications
@@ -730,6 +796,7 @@ contains
 !   ----------
 !          paper on massflux scheme (tiedtke,1989)
 !-----------------------------------------------------------------
+!
       integer  klev,klon,klevp1,klevm1
       real     pten(klon,klev),        pqen(klon,klev),& 
      &         puen(klon,klev),        pven(klon,klev),&
@@ -778,8 +845,8 @@ contains
      &         ktype(klon),            lndj(klon)
       logical  ldcum(klon)
       logical  loddraf(klon),          llo1,   llo2(klon)
-
 !  local varaiables
+
       real     zcons,zcons2,zqumqe,zdqmin,zdh,zmfmax
       real     zalfaw,zalv,zqalv,zc5ldcp,zc4les,zhsat,zgam,zzz,zhhat
       real     zpbmpt,zro,zdz,zdp,zeps,zfac,wspeed
@@ -793,10 +860,22 @@ contains
 !-------------------------------------------
       zcons=1./(g*ztmst)
       zcons2=3./(g*ztmst)
-
 !--------------------------------------------------------------
 !*    2.    initialize values at vertical grid points in 'cuini'
 !--------------------------------------------------------------
+!$acc data pcopy(pten, pqen, puen, pven, pverv, pqsen, pqhfl, pap, paph, &
+!$acc            pgeo, ptte, pqte, pvom, pvol, prsfc, pssfc, ldcum,ktype,&
+!$acc            kcbot, kctop, ptu, pqu, plu, plude, pmfu, pmfd, prain,  &
+!$acc            pcte, phhfl, lndj, zgeoh, dx) &
+!$acc    pcreate(ztenh, zqenh,  &
+!$acc            zqsenh, ztd, zqd, zmfus, zmfds, zmfuq, zmfdq,   &
+!$acc            zdmfup, zdmfdp, zmful, zrfl, zuu, zvu, zud, zvd,zlglac,&
+!$acc            pmflxr, pmflxs, zhcbase, zmfub, zmfub1, zdhpbl, zsfl,  &
+!$acc            zdpmel, zcape, zcape1, zcape2, ztauc, ztaubl,    &
+!$acc            zheat, wup, zdqcv, wbase, zmfuub, upbl, pmfude_rate,&
+!$acc            pmfdde_rate, zmfuus, zmfdus, zuv2, ztenu, ztenv,zmfuvb,&
+!$acc            zsum22, ilab, idtop, ictop0, ilwmin, kdpl, &
+!$acc            loddraf, llo2, zmfs, pmean, zsum12)
       call cuinin &
      &    (klon,     klev,     klevp1,   klevm1,   pten, &
      &     pqen,     pqsen,    puen,     pven,     pverv,&
@@ -806,22 +885,22 @@ contains
      &     pmfu,     pmfd,     zmfus,    zmfds,    zmfuq,&
      &     zmfdq,    zdmfup,   zdmfdp,   zdpmel,   plu,  &
      &     plude,    ilab)
-
 !----------------------------------
 !*    3.0   cloud base calculations
 !----------------------------------
 !*         (a) determine cloud base values in 'cutypen',
 !              and the cumulus type 1 or 2
 !          -------------------------------------------
+
        call cutypen &
      &     ( klon,     klev,     klevp1,   klevm1,     pqen,&
      &      ztenh,    zqenh,     zqsenh,    zgeoh,     paph,&
      &      phhfl,    pqhfl,       pgeo,    pqsen,      pap,&
      &       pten,     lndj,        ptu,      pqu,     ilab,&
      &      ldcum,    kcbot,     ictop0,    ktype,    wbase,    plu,   kdpl)
-
 !*         (b) assign the first guess mass flux at cloud base
 !              ------------------------------------------
+!$acc kernels
        do jl=1,klon
          zdhpbl(jl)=0.0
          upbl(jl) = 0.0
@@ -864,6 +943,7 @@ contains
            zmfub(jl) = 0.
         end if
       end do
+!$acc end kernels
 !------------------------------------------------------
 !*    4.0   determine cloud ascent for entraining plume
 !------------------------------------------------------
@@ -879,10 +959,11 @@ contains
      &     zmfus,    zmfuq,    zmful,    plude,    zdmfup,&
      &     kcbot,    kctop,    ictop0,   icum,     ztmst,&
      &     zqsenh,   zlglac,   lndj,     wup,      wbase,   kdpl,  pmfude_rate )
-
 !*     (b) check cloud depth and change entrainment rate accordingly
 !          calculate precipitation rate (for downdraft calculation)
 !------------------------------------------------------------------
+
+!$acc kernels
       do jl=1,klon
         if ( ldcum(jl) ) then
           ikb = kcbot(jl)
@@ -910,10 +991,11 @@ contains
         zdpmel(jl,jk) = 0.
       end do
       end do
-
+!$acc end kernels
 !-----------------------------------------
 !*    6.0   cumulus downdraft calculations
 !-----------------------------------------
+
       if(lmfdd) then
 !*      (a) determine lfs in 'cudlfsn'
 !--------------------------------------
@@ -937,13 +1019,14 @@ contains
      &     pmfd,     zmfds,    zmfdq,    zdmfdp,   pmfdde_rate      )
 !-----------------------------------------------------------
       end if
-!
 !-----------------------------------------------------------------------
 !* 6.0          closure and clean work
 ! ------
 !-- 6.1 recalculate cloud base massflux from a cape closure
 !       for deep convection (ktype=1) 
 !
+!
+!$acc kernels
       do jl=1,klon
       if(ldcum(jl) .and. ktype(jl) .eq. 1) then
         ikb = kcbot(jl)
@@ -1011,10 +1094,10 @@ contains
            zmfub1(jl)=min(zmfub1(jl),zmfmax)
        end if
       end do
-!
 !*  6.2   recalculate convective fluxes due to effect of
 !         downdrafts on boundary layer moist static energy budget (ktype=2)
 !--------------------------------------------------------
+!
        do jl=1,klon
          if(ldcum(jl) .and. ktype(jl) .eq. 2) then
            ikb=kcbot(jl)
@@ -1038,17 +1121,18 @@ contains
            end if
            zmfub1(jl) = min(zmfub1(jl),zmfmax)
          end if
-
 !*  6.3   mid-level convection - nothing special
 !---------------------------------------------------------
+
          if(ldcum(jl) .and. ktype(jl) .eq. 3 ) then
             zmfub1(jl) = zmfub(jl)
          end if
 
        end do
-
+!$acc end kernels
 !*  6.4   scaling the downdraft mass flux
 !---------------------------------------------------------
+!$acc kernels
        do jk=1,klev
        do jl=1,klon
         if( ldcum(jl) ) then
@@ -1061,9 +1145,9 @@ contains
         end if
        end do
        end do
-
 !*  6.5   scaling the updraft mass flux
 ! --------------------------------------------------------
+
     do jl = 1,klon
       if ( ldcum(jl) ) zmfs(jl) = zmfub1(jl)/max(cmfcmin,zmfub(jl))
     end do
@@ -1095,9 +1179,9 @@ contains
         end if
       end do
     end do
-
 !*    6.6  if ktype = 2, kcbot=kctop is not allowed
 ! ---------------------------------------------------
+
     do jl = 1,klon
       if ( ktype(jl) == 2 .and. &
            kcbot(jl) == kctop(jl) .and. kcbot(jl) >= klev-1 ) then
@@ -1116,9 +1200,9 @@ contains
         end if
       end do
     end if
-
 !*   6.7  set downdraft mass fluxes to zero above cloud top
 !----------------------------------------------------
+
     do jl = 1,klon
       if ( loddraf(jl) .and. idtop(jl) <= kctop(jl) ) then
         idtop(jl) = kctop(jl) + 1
@@ -1139,6 +1223,7 @@ contains
         end if
       end do
     end do
+!$acc end kernels
 !----------------------------------------------------------
 !*    7.0      determine final convective fluxes in 'cuflx'
 !----------------------------------------------------------
@@ -1152,12 +1237,15 @@ contains
      &  ,  zmfuq,    zmfdq,    zmful,    plude                   &              
      &  ,  zdmfup,   zdmfdp,   zdpmel,   zlglac                   &             
      &  ,  prain,    pmfdde_rate, pmflxr, pmflxs )     
-
 ! some adjustments needed
+
+!$acc kernels
     do jl=1,klon
       zmfs(jl) = 1.
       zmfuub(jl)=0.
     end do
+!$acc end kernels
+!$acc kernels
     do jk = 2 , klev
       do jl = 1,klon
         if ( loddraf(jl) .and. jk >= idtop(jl)-1 ) then
@@ -1168,7 +1256,9 @@ contains
         end if
       end do
     end do
+!$acc end kernels
 
+!$acc kernels
     do jk = 2 , klev
       do jl = 1 , klon
         if ( zmfs(jl) < 1. .and. jk >= idtop(jl)-1 ) then
@@ -1202,8 +1292,8 @@ contains
         end if
       end do
     end do
-
 ! avoid negative humidities at ddraught top
+
     do jl = 1,klon
       if ( loddraf(jl) ) then
         jk = idtop(jl)
@@ -1213,9 +1303,11 @@ contains
         end if
       end if
     end do
-
+!$acc end kernels
 ! avoid negative humidities near cloud top because gradient of precip flux
 ! and detrainment / liquid water flux are too large
+
+!$acc kernels
     do jk = 2 , klev
       do jl = 1, klon
         if ( ldcum(jl) .and. jk >= kctop(jl)-1 .and. jk < kcbot(jl) ) then
@@ -1238,10 +1330,12 @@ contains
       prsfc(jl) = pmflxr(jl,klev+1)
       pssfc(jl) = pmflxs(jl,klev+1)
     end do
+!$acc end kernels
 
 !----------------------------------------------------------------
 !*    8.0      update tendencies for t and q in subroutine cudtdq
 !----------------------------------------------------------------
+
       call cudtdqn(klon,klev,itopm2,kctop,idtop,ldcum,loddraf, &
                  ztmst,paph,zgeoh,pgeo,pten,ztenh,pqen,zqenh,pqsen,     &
                  zlglac,plude,pmfu,pmfd,zmfus,zmfds,zmfuq,zmfdq,zmful,   &
@@ -1250,6 +1344,7 @@ contains
 !*    9.0      update tendencies for u and u in subroutine cududv
 !----------------------------------------------------------------
       if(lmfdudv) then
+!$acc kernels
       do jk = klev-1 , 2 , -1
         ik = jk + 1
         do jl = 1,klon
@@ -1297,8 +1392,10 @@ contains
           end if
         end do
       end do
+!$acc end kernels
 
       if(lmfdd) then
+!$acc kernels
       do jk = 3 , klev
         ik = jk - 1
         do jl = 1,klon
@@ -1317,10 +1414,12 @@ contains
           end if
         end do
       end do
+!$acc end kernels
       end if
 !   --------------------------------------------------
 !   rescale massfluxes for stability in Momentum
 !------------------------------------------------------------------------
+!$acc kernels
       zmfs(:) = 1.
       do jk = 2 , klev
         do jl = 1, klon
@@ -1350,12 +1449,14 @@ contains
           ztenv(jl,jk) = pvol(jl,jk)
         end do
       end do
+!$acc end kernels
 
       call cududvn(klon,klev,itopm2,ktype,kcbot,kctop, &
                   ldcum,ztmst,paph,puen,pven,zmfuus,zmfdus,zuu,  &
                   zud,zvu,zvd,pvom,pvol)
-
 !  calculate KE dissipation
+
+!$acc kernels
       do jl = 1, klon
         zsum12(jl) = 0.
         zsum22(jl) = 0.
@@ -1382,14 +1483,16 @@ contains
             end if
           end do
         end do
+!$acc end kernels
 
       end if
-
 !----------------------------------------------------------------------
 !*   10.           IN CASE THAT EITHER DEEP OR SHALLOW IS SWITCHED OFF
 ! NEED TO SET SOME VARIABLES A POSTERIORI TO ZERO
 ! ---------------------------------------------------
+
     if ( .not. lmfscv .or. .not. lmfpen ) then
+!$acc kernels
       do jk = 2 , klev
         do jl = 1, klon
           if ( llo2(jl) .and. jk >= kctop(jl)-1 ) then
@@ -1407,8 +1510,9 @@ contains
           kcbot(jl) = klev - 1
         end if
       end do
+!$acc end kernels
     end if
-
+!$acc end data
       return
       end subroutine cumastrn
 
@@ -1466,12 +1570,23 @@ contains
       integer  jl,jk
       integer  icall,ik
       real     zzs
+      real     zqp, zqsat, zcor, zcond1
+      real     input_tt, foealfa_tt, foeewm_tt, foedem_tt, foeldcpm_tt
 !------------------------------------------------------------
 !*    1.       specify large scale parameters at half levels
 !*             adjust temperature fields if staticly unstable
 !*             find level of maximum vertical velocity
 ! -----------------------------------------------------------
+!$acc data pcopy(pten, pqen, puen, pven, pqsen, pverv, pgeo, pgeoh, &
+!$acc            paph, ptenh, pqenh, pqsenh, ptu, pqu, ptd, pqd,puu,&
+!$acc            pud, pvu, pvd, pmfu, pmfd, pmfus,pmfds,pmfuq,pmfdq,&
+!$acc            pdmfup, pdmfdp, plu, plude,pdpmel,klab,&
+!$acc            klwmin)&
+!$acc    pcreate(zwmax, zph, loflag)
+!$acc kernels
+!kimjy error loop
       do jk=2,klev
+!$acc loop gang vector
       do jl=1,klon
         ptenh(jl,jk)=(max(cpd*pten(jl,jk-1)+pgeo(jl,jk-1), &
      &             cpd*pten(jl,jk)+pgeo(jl,jk))-pgeoh(jl,jk))*rcpd
@@ -1484,14 +1599,83 @@ contains
       if ( jk >= klev-1 .or. jk < 2 ) cycle
       ik=jk
       icall=0
-      call cuadjtqn(klon,klev,ik,zph,ptenh,pqsenh,loflag,icall)
+!---------------------------------------------------------------------------
+!       call cuadjtqn(klon, klev, ik, zph, ptenh, pqsenh, loflag, icall)
+! subroutine cuadjtqn(klon, klev, kk, psp,    pt,     pq, ldflag, kcall)                           
+!---------------------------------------------------------------------------
+!$acc loop gang vector
+      do jl = 1,klon
+        zqp = 1./zph(jl)
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+          input_tt = ptenh(jl,ik)
+          foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+          foeewm_tt  = c2es *(foealfa_tt*exp(c3les*(input_tt-tmelt)/(input_tt-c4les))+ &
+                       (1.-foealfa_tt)*exp(c3ies*(input_tt-tmelt)/(input_tt-c4ies)))
+!----------------------------------------------------------------------------------------
+        zqsat = foeewm_tt*zqp
+        zqsat = min(0.5,zqsat)
+        zcor = 1./(1.-vtmpc1*zqsat)
+        zqsat = zqsat*zcor
+!----------------------------------------------------------------------------------------
+!         function inlining foedem
+!----------------------------------------------------------------------------------------
+        input_tt = ptenh(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foedem_tt  =foealfa_tt*r5alvcp*(1./(input_tt-c4les)**2)+(1.-foealfa_tt)*r5alscp*(1./(input_tt-c4ies)**2)
+!----------------------------------------------------------------------------------------
+
+        zcond1 = (pqsenh(jl,ik)-zqsat)/(1.+zqsat*zcor*foedem_tt)
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+        input_tt = ptenh(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foeldcpm_tt = foealfa_tt*ralvdcp+(1.-foealfa_tt)*ralsdcp
+!----------------------------------------------------------------------------------------
+        ptenh(jl,ik) = ptenh(jl,ik) + foeldcpm_tt*zcond1
+        pqsenh(jl,ik) = pqsenh(jl,ik) - zcond1
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+          input_tt = ptenh(jl,ik)
+          foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+          foeewm_tt  = c2es *(foealfa_tt*exp(c3les*(input_tt-tmelt)/(input_tt-c4les))+ &
+                       (1.-foealfa_tt)*exp(c3ies*(input_tt-tmelt)/(input_tt-c4ies)))
+!----------------------------------------------------------------------------------------
+        zqsat = foeewm_tt*zqp
+        zqsat = min(0.5,zqsat)
+        zcor = 1./(1.-vtmpc1*zqsat)
+        zqsat = zqsat*zcor
+!----------------------------------------------------------------------------------------
+!         function inlining foedem
+!----------------------------------------------------------------------------------------
+        input_tt = ptenh(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foedem_tt  =foealfa_tt*r5alvcp*(1./(input_tt-c4les)**2)+(1.-foealfa_tt)*r5alscp*(1./(input_tt-c4ies)**2)
+!----------------------------------------------------------------------------------------
+        zcond1 = (pqsenh(jl,ik)-zqsat)/(1.+zqsat*zcor*foedem_tt)
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+        input_tt = ptenh(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foeldcpm_tt = foealfa_tt*ralvdcp+(1.-foealfa_tt)*ralsdcp
+!----------------------------------------------------------------------------------------
+        ptenh(jl,ik) = ptenh(jl,ik) + foeldcpm_tt*zcond1
+        pqsenh(jl,ik) = pqsenh(jl,ik) - zcond1
+      end do
+!---------------------------------------------------------------------------
+!$acc loop gang vector
       do jl=1,klon
         pqenh(jl,jk)=min(pqen(jl,jk-1),pqsen(jl,jk-1)) &
      &            +(pqsenh(jl,jk)-pqsen(jl,jk-1))
         pqenh(jl,jk)=max(pqenh(jl,jk),0.)
       end do
       end do
-
+!$acc end kernels
+!$acc kernels
       do jl=1,klon
         ptenh(jl,klev)=(cpd*pten(jl,klev)+pgeo(jl,klev)- &
      &                pgeoh(jl,klev))*rcpd
@@ -1537,6 +1721,8 @@ contains
       klab(jl,jk)=0
       end do
       end do
+!$acc end kernels
+!$acc end data
       return
       end subroutine cuinin
 
@@ -1607,15 +1793,15 @@ contains
       real     zph(klon)
       integer  lndj(klon)
       logical  loflag(klon), deepflag(klon), resetflag(klon)
-
 ! output variables
+
       real     cutu(klon,klev), cuqu(klon,klev), culu(klon,klev)
       integer  culab(klon,klev)
       real     wbase(klon)
       integer  ktype(klon),cubot(klon),cutop(klon),kdpl(klon)
       logical  ldcum(klon)
-
 ! local variables
+
       real     zqold(klon)
       real     rho, part1, part2, root, conw, deltt, deltq
       real     eta(klon),dz(klon),coef(klon)
@@ -1637,9 +1823,20 @@ contains
       integer  zcbase(klon), itoppacel(klon)
       integer  jl,jk,ik,icall,levels
       logical  needreset, lldcum(klon)
+      integer  needreset_int
+      real     zqp, zl, zi, zqsat, zf, zcond, zcond1  
+      real     input_tt, foealfa_tt, foeewm_tt, foealfa_tt2, foeldcpm_tt
 !--------------------------------------------------------------
       t13 = 1.0/3.0
 !
+!$acc data pcopy(pqen, ptenh, pqenh, pqsenh, pgeoh, paph, hfx, qfx, pgeo, &
+!$acc            pqsen, pap, pten, lndj, cutu, cuqu, culab, ldcum, cubot, &
+!$acc            cutop, ktype, wbase, culu, kdpl)&
+!$acc    pcreate(ptu, pqu, plu, klab, kctop, zph, &
+!$acc            loflag, deepflag, resetflag, &
+!$acc            zqold, eta, dz, coef, dhen, dh, plude, kup, vptu,vten,&
+!$acc            zbuo, abuoy, zcbase, itoppacel, lldcum, kcbot)
+!$acc kernels
       do jl=1,klon
         kcbot(jl)=klev
         kctop(jl)=klev
@@ -1648,12 +1845,12 @@ contains
         wbase(jl)=0.
         ldcum(jl)=.false.
       end do
-
 !-----------------------------------------------------------
 ! let's do test,and check the shallow convection first
 ! the first level is klev
 ! define deltat and deltaq
 !-----------------------------------------------------------
+
       do jk=1,klev
       do jl=1,klon
           plu(jl,jk)=culu(jl,jk)  ! parcel liquid water
@@ -1675,12 +1872,15 @@ contains
          lldcum(jl) = .false.
          loflag(jl) = .true.
       end do
-
+!$acc end kernels
 ! check the levels from lowest level to second top level
-      do jk=klevm1,2,-1
 
+      do jk=klevm1,2,-1
 ! define the variables at the first level      
+
       if(jk .eq. klevm1) then
+!kimjy error loop
+!$acc kernels
       do jl=1,klon
         rho=pap(jl,klev)/ &
      &         (rd*(pten(jl,klev)*(1.+vtmpc1*pqen(jl,klev))))
@@ -1705,17 +1905,22 @@ contains
           loflag(jl) = .false.
         end if
       end do
+!$acc end kernels
       end if
  
       is=0
+!$acc kernels 
+!$acc loop reduction(+:is)
       do jl=1,klon
          if(loflag(jl))then
             is=is+1
          endif
       enddo
+!$acc end kernels
       if(is.eq.0) exit
-
 ! the next levels, we use the variables at the first level as initial values
+
+!$acc kernels
       do jl=1,klon
       if(loflag(jl)) then
         eta(jl) = 0.8/(pgeo(jl,jk)*zrg)+2.e-4
@@ -1731,16 +1936,102 @@ contains
         zph(jl)=paph(jl,jk)
       end if
       end do
-! check if the parcel is saturated
-      ik=jk
+!$acc end kernels
+!! check if the parcel is saturated
       icall=1
-      call cuadjtqn(klon,klev,ik,zph,ptu,pqu,loflag,icall)
+
+!-------------------------------------------------------------------------------------------
+! function inlining cuadjtqn
+!         call cuadjtqn(klon, klev, ik, zph,ptu,pqu, loflag,  icall)
+!   subroutine cuadjtqn(klon, klev, kk, psp, pt, pq, ldflag,  kcall)                           
+!-------------------------------------------------------------------------------------------
+!$acc kernels
+      do jl = 1,klon
+        if ( loflag(jl) ) then
+          ik=jk
+          zqp = 1./zph(jl)
+          zl = 1./(ptu(jl,ik)-c4les)
+          zi = 1./(ptu(jl,ik)-c4ies)
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ptu(jl,ik)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+          !zqsat = c2es*(foealfa(ptu(jl,ik))*exp(c3les*(ptu(jl,ik)-tmelt)*zl) + &
+          !      (1.-foealfa(ptu(jl,ik)))*exp(c3ies*(ptu(jl,ik)-tmelt)*zi))
+          zqsat = c2es*(foealfa_tt*exp(c3les*(ptu(jl,ik)-tmelt)*zl) + &
+                (1.-foealfa_tt)*exp(c3ies*(ptu(jl,ik)-tmelt)*zi))
+          zqsat = zqsat*zqp
+          zqsat = min(0.5,zqsat)
+          zcor = 1. - vtmpc1*zqsat
+          zf = foealfa_tt*r5alvcp*zl**2 + &
+               (1.-foealfa_tt)*r5alscp*zi**2
+          zcond = (pqu(jl,ik)*zcor**2-zqsat*zcor)/(zcor**2+zqsat*zf)
+          if ( zcond > 0. ) then
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+        input_tt = ptu(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foeldcpm_tt = foealfa_tt*ralvdcp+(1.-foealfa_tt)*ralsdcp
+!----------------------------------------------------------------------------------------
+            ptu(jl,ik) = ptu(jl,ik) + foeldcpm_tt*zcond
+            pqu(jl,ik) = pqu(jl,ik) - zcond
+            zl = 1./(ptu(jl,ik)-c4les)
+            zi = 1./(ptu(jl,ik)-c4ies)
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ptu(jl,ik)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+            !zqsat = c2es*(foealfa(ptu(jl,ik)) * &
+            !  exp(c3les*(ptu(jl,ik)-tmelt)*zl)+(1.-foealfa(ptu(jl,ik))) * &
+            !  exp(c3ies*(ptu(jl,ik)-tmelt)*zi))
+            zqsat = c2es*(foealfa_tt * &
+              exp(c3les*(ptu(jl,ik)-tmelt)*zl)+(1.-foealfa_tt) * &
+              exp(c3ies*(ptu(jl,ik)-tmelt)*zi))
+            zqsat = zqsat*zqp
+            zqsat = min(0.5,zqsat)
+            zcor = 1. - vtmpc1*zqsat
+            !zf = foealfa(ptu(jl,ik))*r5alvcp*zl**2 + &
+            !     (1.-foealfa(ptu(jl,ik)))*r5alscp*zi**2
+            zf = foealfa_tt*r5alvcp*zl**2 + &
+                 (1.-foealfa_tt)*r5alscp*zi**2
+            zcond1 = (pqu(jl,ik)*zcor**2-zqsat*zcor)/(zcor**2+zqsat*zf)
+            if ( abs(zcond) < 1.e-20 ) zcond1 = 0.
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+        input_tt = ptu(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foeldcpm_tt = foealfa_tt*ralvdcp+(1.-foealfa_tt)*ralsdcp
+!----------------------------------------------------------------------------------------
+            ptu(jl,ik) = ptu(jl,ik) + foeldcpm_tt*zcond1
+            pqu(jl,ik) = pqu(jl,ik) - zcond1
+          end if
+        end if
+      end do
+!-------------------------------------------------------------------------------------------
+
+!!$acc loop gang vector independent
       do jl=1,klon
         if( loflag(jl) ) then
           zdq = max((zqold(jl) - pqu(jl,jk)),0.)
           plu(jl,jk) = plu(jl,jk+1) + zdq
-          zlglac=zdq*((1.-foealfa(ptu(jl,jk))) - &
-                      (1.-foealfa(ptu(jl,jk+1))))
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ptu(jl,jk)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+         input_tt = ptu(jl,jk+1)
+         foealfa_tt2 =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+!          zlglac=zdq*((1.-foealfa(ptu(jl,jk))) - &
+!                      (1.-foealfa(ptu(jl,jk+1))))
+          zlglac=zdq*((1.-foealfa_tt) - &
+                      (1.-foealfa_tt2))
           plu(jl,jk) = min(plu(jl,jk),5.e-3)
           dh(jl,jk) =  pgeoh(jl,jk) + cpd*(ptu(jl,jk)+ralfdcp*zlglac)
 ! compute the updraft speed
@@ -1753,20 +2044,36 @@ contains
           atop2 = 2.0*dz(jl)*abuoy(jl,jk)
           abot =  1.0 + 2.*coef(jl)
           kup(jl,jk)  = (atop1*kup(jl,jk+1) + atop2) / abot
-
 ! let's find the exact cloud base
+
          if ( plu(jl,jk) > 0. .and. klab(jl,jk+1) == 1 ) then
               ik = jk + 1
-              zqsu = foeewm(ptu(jl,ik))/paph(jl,ik)
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+          input_tt = ptu(jl,ik)
+          foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+          foeewm_tt  = c2es *(foealfa_tt*exp(c3les*(input_tt-tmelt)/(input_tt-c4les))+ &
+                       (1.-foealfa_tt)*exp(c3ies*(input_tt-tmelt)/(input_tt-c4ies)))
+!----------------------------------------------------------------------------------------
+              !zqsu = foeewm(ptu(jl,ik))/paph(jl,ik)
+              zqsu = foeewm_tt/paph(jl,ik)
               zqsu = min(0.5,zqsu)
               zcor = 1./(1.-vtmpc1*zqsu)
               zqsu = zqsu*zcor
               zdq = min(0.,pqu(jl,ik)-zqsu)
-              zalfaw = foealfa(ptu(jl,ik))
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ptu(jl,ik)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+!              zalfaw = foealfa(ptu(jl,ik))
+              zalfaw = foealfa_tt
               zfacw = c5les/((ptu(jl,ik)-c4les)**2)
               zfaci = c5ies/((ptu(jl,ik)-c4ies)**2)
               zfac = zalfaw*zfacw + (1.-zalfaw)*zfaci
-              zesdp = foeewm(ptu(jl,ik))/paph(jl,ik)
+              zesdp = foeewm_tt/paph(jl,ik)
               zcor = 1./(1.-vtmpc1*zesdp)
               zdqsdt = zfac*zcor*zqsu
               zdtdp = rd*ptu(jl,ik)/(cpd*paph(jl,ik))
@@ -1802,9 +2109,12 @@ contains
           end if
         end if
       end do
+!$acc end kernels
 
       end do ! end all the levels
+!!$acc end kernels
 
+!$acc kernels
       do jl=1,klon
         ikb = kcbot(jl)
         ikt = kctop(jl)
@@ -1836,7 +2146,7 @@ contains
            end if
        end do
       end do
-      
+!$acc end kernels
 !-----------------------------------------------------------
 ! next, let's check the deep convection
 ! the first level is klevm1-1
@@ -1844,8 +2154,10 @@ contains
 !----------------------------------------------------------
 ! we check the parcel starting level by level
 ! assume the mix-layer is 60hPa
+      
       deltt = 0.2
       deltq = 1.0e-4
+!$acc kernels
       do jl=1,klon
         deepflag(jl) = .false.
       end do
@@ -1855,8 +2167,10 @@ contains
          if((paph(jl,klev+1)-paph(jl,jk)) .lt. 350.e2) itoppacel(jl) = jk
        end do
       end do
+!$acc end kernels
 
       do levels=klevm1-1,klev/2,-1 ! loop starts
+!$acc kernels
         do jk=1,klev
           do jl=1,klon
              plu(jl,jk)=0.0  ! parcel liquid water
@@ -1881,19 +2195,23 @@ contains
            resetflag(jl)= .false.
            loflag(jl)   = (.not. deepflag(jl)) .and. (levels.ge.itoppacel(jl))
         end do
-
+!$acc end kernels
 ! start the inner loop to search the deep convection points
       do jk=levels,2,-1
         is=0
+!$acc kernels
+!$acc loop reduction(+:is)
         do jl=1,klon
          if(loflag(jl))then
             is=is+1
          endif
         enddo
+!$acc end kernels
         if(is.eq.0) exit
-
 ! define the variables at the departure level 
+
         if(jk .eq. levels) then
+!$acc kernels
           do jl=1,klon
           if(loflag(jl)) then
             if((paph(jl,klev+1)-paph(jl,jk)) < 60.e2) then
@@ -1901,6 +2219,7 @@ contains
               qmix=0.
               zmix=0.
               pmix=0.
+!$acc loop reduction(+:pmix, tmix, qmix, zmix)
               do nk=jk+2,jk,-1
               if(pmix < 50.e2) then
                 dp = paph(jl,nk) - paph(jl,nk-1)
@@ -1930,9 +2249,12 @@ contains
             zbuo(jl,jk+1)=(vptu(jl,jk+1)-vten(jl,jk+1))/vten(jl,jk+1)
           end if
           end do
+!$acc end kernels
         end if
-
 ! the next levels, we use the variables at the first level as initial values
+
+!$acc kernels
+!kimjy error loop
         do jl=1,klon
            if(loflag(jl)) then
 ! define the fscale
@@ -1952,15 +2274,94 @@ contains
         end do
 ! check if the parcel is saturated
         ik=jk
-        icall=1
-        call cuadjtqn(klon,klev,ik,zph,ptu,pqu,loflag,icall)
+!------------------------------------------------------------------------------------
+!        call cuadjtqn(klon, klev, ik, zph, ptu, pqu, loflag, icall)
+!  subroutine cuadjtqn(klon, klev, kk, psp,  pt,  pq, ldflag, kcall)
+!------------------------------------------------------------------------------------
+!kimjy loop error
+      do jl = 1,klon
+        if ( loflag(jl) ) then
+          zqp = 1./zph(jl)
+          zl = 1./(ptu(jl,ik)-c4les)
+          zi = 1./(ptu(jl,ik)-c4ies)
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ptu(jl,ik)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+!          zqsat = c2es*(foealfa(ptu(jl,ik))*exp(c3les*(ptu(jl,ik)-tmelt)*zl) + &
+!                (1.-foealfa(ptu(jl,ik)))*exp(c3ies*(ptu(jl,ik)-tmelt)*zi))
+          zqsat = c2es*(foealfa_tt*exp(c3les*(ptu(jl,ik)-tmelt)*zl) + &
+                (1.-foealfa_tt)*exp(c3ies*(ptu(jl,ik)-tmelt)*zi))
+          zqsat = zqsat*zqp
+          zqsat = min(0.5,zqsat)
+          zcor = 1. - vtmpc1*zqsat
+          zf = foealfa_tt*r5alvcp*zl**2 + &
+               (1.-foealfa_tt)*r5alscp*zi**2
+          zcond = (pqu(jl,ik)*zcor**2-zqsat*zcor)/(zcor**2+zqsat*zf)
+          if ( zcond > 0. ) then
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+        input_tt = ptu(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foeldcpm_tt = foealfa_tt*ralvdcp+(1.-foealfa_tt)*ralsdcp
+!----------------------------------------------------------------------------------------
+            ptu(jl,ik) = ptu(jl,ik) + foeldcpm_tt*zcond
+            pqu(jl,ik) = pqu(jl,ik) - zcond
+            zl = 1./(ptu(jl,ik)-c4les)
+            zi = 1./(ptu(jl,ik)-c4ies)
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ptu(jl,ik)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+            zqsat = c2es*(foealfa_tt * &
+              exp(c3les*(ptu(jl,ik)-tmelt)*zl)+(1.-foealfa_tt) * &
+              exp(c3ies*(ptu(jl,ik)-tmelt)*zi))
+            zqsat = zqsat*zqp
+            zqsat = min(0.5,zqsat)
+            zcor = 1. - vtmpc1*zqsat
+!            zf = foealfa(ptu(jl,ik))*r5alvcp*zl**2 + &
+!                 (1.-foealfa(ptu(jl,ik)))*r5alscp*zi**2
+            zf = foealfa_tt*r5alvcp*zl**2 + &
+                 (1.-foealfa_tt)*r5alscp*zi**2
+            zcond1 = (pqu(jl,ik)*zcor**2-zqsat*zcor)/(zcor**2+zqsat*zf)
+            if ( abs(zcond) < 1.e-20 ) zcond1 = 0.
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+        input_tt = ptu(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foeldcpm_tt = foealfa_tt*ralvdcp+(1.-foealfa_tt)*ralsdcp
+!----------------------------------------------------------------------------------------
+            ptu(jl,ik) = ptu(jl,ik) + foeldcpm_tt*zcond1
+            pqu(jl,ik) = pqu(jl,ik) - zcond1
+          end if
+        end if
+      end do
+!$acc end kernels
+!------------------------------------------------------------------------------------
  
+!$acc kernels
       do jl=1,klon
         if( loflag(jl) ) then
           zdq = max((zqold(jl) - pqu(jl,jk)),0.)
           plu(jl,jk) = plu(jl,jk+1) + zdq
-          zlglac=zdq*((1.-foealfa(ptu(jl,jk))) - &
-                      (1.-foealfa(ptu(jl,jk+1))))
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ptu(jl,jk)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+         input_tt = ptu(jl,jk+1)
+         foealfa_tt2 =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+!          zlglac=zdq*((1.-foealfa(ptu(jl,jk))) - &
+!                      (1.-foealfa(ptu(jl,jk+1))))
+          zlglac=zdq*((1.-foealfa_tt) - &
+                      (1.-foealfa_tt2))
           plu(jl,jk) = 0.5*plu(jl,jk)
           dh(jl,jk) =  pgeoh(jl,jk) + cpd*(ptu(jl,jk)+ralfdcp*zlglac)
 ! compute the updraft speed
@@ -1976,16 +2377,32 @@ contains
 ! let's find the exact cloud base
           if ( plu(jl,jk) > 0. .and. klab(jl,jk+1) == 1 ) then
               ik = jk + 1
-              zqsu = foeewm(ptu(jl,ik))/paph(jl,ik)
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+          input_tt = ptu(jl,ik)
+          foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+          foeewm_tt  = c2es *(foealfa_tt*exp(c3les*(input_tt-tmelt)/(input_tt-c4les))+ &
+                       (1.-foealfa_tt)*exp(c3ies*(input_tt-tmelt)/(input_tt-c4ies)))
+!----------------------------------------------------------------------------------------
+              !zqsu = foeewm(ptu(jl,ik))/paph(jl,ik)
+              zqsu = foeewm_tt/paph(jl,ik)
               zqsu = min(0.5,zqsu)
               zcor = 1./(1.-vtmpc1*zqsu)
               zqsu = zqsu*zcor
               zdq = min(0.,pqu(jl,ik)-zqsu)
-              zalfaw = foealfa(ptu(jl,ik))
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ptu(jl,ik)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+              zalfaw = foealfa_tt
               zfacw = c5les/((ptu(jl,ik)-c4les)**2)
               zfaci = c5ies/((ptu(jl,ik)-c4ies)**2)
               zfac = zalfaw*zfacw + (1.-zalfaw)*zfaci
-              zesdp = foeewm(ptu(jl,ik))/paph(jl,ik)
+              !zesdp = foeewm(ptu(jl,ik))/paph(jl,ik)
+              zesdp = foeewm_tt/paph(jl,ik)
               zcor = 1./(1.-vtmpc1*zesdp)
               zdqsdt = zfac*zcor*zqsu
               zdtdp = rd*ptu(jl,ik)/(cpd*paph(jl,ik))
@@ -2021,10 +2438,13 @@ contains
           end if
         end if
       end do
+!$acc end kernels
 
       end do ! end all the levels
 
-      needreset = .false.
+      !needreset = .false.
+      needreset_int = 0
+!$acc kernels
       do jl=1,klon
         ikb = kcbot(jl)
         ikt = kctop(jl)
@@ -2037,12 +2457,15 @@ contains
          cubot(jl)    = ikb
          cutop(jl)    = ikt
          kdpl(jl)     = levels+1
-         needreset    = .true.
+         !needreset    = .true.
+         needreset_int= needreset_int + 1
          resetflag(jl)= .true.
         end if
       end do
+!$acc end kernels
 
-      if(needreset) then
+      if(needreset_int > 0) then
+!$acc kernels
       do jk=klev,1,-1
         do jl=1,klon
           if(resetflag(jl)) then
@@ -2063,10 +2486,11 @@ contains
           end if
         end do
       end do
+!$acc end kernels
       end if
 
       end do ! end all cycles
-
+!$acc end data
       return
       end subroutine cutypen
 
@@ -2194,7 +2618,7 @@ contains
 ! local variables
       integer  jl,jk
       integer  ikb,icum,itopm2,ik,icall,is,kcum,jlm,jll
-      integer  jlx(klon)
+      logical  jlx(klon)
       real     ztmst,zcons2,zfacbuo,zprcdgw,z_cwdrag,z_cldmax,z_cwifrac,z_cprc2
       real     zmftest,zmfmax,zqeen,zseen,zscde,zqude
       real     zmfusk,zmfuqk,zmfulk
@@ -2203,6 +2627,11 @@ contains
       real     zrnew,zz,zdmfeu,zdmfdu,dp
       real     zfac,zbuoc,zdkbuo,zdken,zvv,zarg,zchange,zxe,zxs,zdshrd
       real     atop1,atop2,abot
+      real     zzzmb
+      real     zentr(klon), zdz, zmf
+      logical  llo1_in
+      real     zqp, zl, zi, zqsat, zcor, zf, zcond, zcond1
+      real     input_tt, foealfa_tt, foealfa_tt2, foeldcpm_tt
 !--------------------------------
 !*    1.       specify parameters
 !--------------------------------
@@ -2217,6 +2646,16 @@ contains
 !     2.        set default values
 !---------------------------------
       llo3 = .false.
+!$acc data pcopy(ptenh, pqenh, pten, pqen, pgeo, pgeoh, pap, paph, pqsen, pqte, pverv, &
+!$acc            pqsenh, ptu, pqu, puu, pvu, pmfu, pmfub, pmfus, pmfuq,plu, plude,&
+!$acc            pmful, pdmfup, phcbase,  &
+!$acc            wup, wbase, plglac, &
+!$acc            klwmin, ktype, klab, kcbot, kctop, kctop0, lndj, ldcum,  &
+!$acc            llo1, kdpl, pmfude_rate, puen, pven) &
+!$acc    pcreate(jlx, zentr, zph, zdmfen, zdmfde, zmfuu, zmfuv, zpbase, zqold, &
+!$acc            zluold, zprecip, zlrain, zbuo, kup, zodetr, eta, dz, loflag,  &
+!$acc            llo1, zoentr, zdpmean, pdmfen)
+!$acc kernels
       do jl=1,klon
         zluold(jl)=0.
         wup(jl)=0.
@@ -2229,8 +2668,8 @@ contains
           pqu(jl,klev) = 0.
         end if
       end do
-
  ! initialize variout quantities     
+
       do jk=1,klev
       do jl=1,klon
           if(jk.ne.kcbot(jl)) plu(jl,jk)=0.
@@ -2250,13 +2689,15 @@ contains
           if(.not.ldcum(jl).and.paph(jl,jk).lt.4.e4) kctop0(jl)=jk
       end do
       end do
-
       do jl = 1,klon
         if ( ktype(jl) == 3 ) ldcum(jl) = .false.
       end do
+!$acc end kernels
 !------------------------------------------------
 !     3.0      initialize values at cloud base level
 !------------------------------------------------
+!kimjy error loop
+!$acc kernels
       do jl=1,klon
         kctop(jl)=kcbot(jl)
         if(ldcum(jl)) then
@@ -2268,7 +2709,7 @@ contains
           pmful(jl,ikb) = pmfub(jl)*plu(jl,ikb)
         end if
       end do
-!
+!$acc end kernels
 !-----------------------------------------------------------------
 !     4.       do ascent: subcloud layer (klab=1) ,clouds (klab=2)
 !              by doing first dry-adiabatic ascent and then
@@ -2276,21 +2717,62 @@ contains
 !              then check for buoyancy and set flags accordingly
 !-----------------------------------------------------------------
 !
-      do jk=klevm1,3,-1
+!
 !             specify cloud base values for midlevel convection
 !             in *cubasmc* in case there is not already convection
 ! ---------------------------------------------------------------------
+      do jk=klevm1,3,-1
       ik=jk
-      call cubasmcn&
-     &    (klon,     klev,     klevm1,   ik,      pten,&
-     &     pqen,     pqsen,    puen,     pven,    pverv,&
-     &     pgeo,     pgeoh,    ldcum,   ktype,   klab,  zlrain,&
-     &     pmfu,     pmfub,    kcbot,   ptu,&
-     &     pqu,      plu,      puu,     pvu,      pmfus,&
-     &     pmfuq,    pmful,    pdmfup)
+! ---------------------------------------------------------------------
+!     function inlining cubasmcn
+!      call cubasmcn&
+!     &    (klon,     klev,     klevm1,   ik,      pten,&
+!     &     pqen,     pqsen,    puen,     pven,    pverv,&
+!     &     pgeo,     pgeoh,    ldcum,   ktype,   klab,  zlrain,&
+!     &     pmfu,     pmfub,    kcbot,   ptu,&
+!     &     pqu,      plu,      puu,     pvu,      pmfus,&
+!     &     pmfuq,    pmful,    pdmfup)
+!      subroutine cubasmcn &
+!     &    (klon,     klev,     klevm1,  kk,     pten,&
+!     &     pqen,     pqsen,    puen,    pven,   pverv,&
+!     &     pgeo,     pgeoh,    ldcum,   ktype,  klab,  plrain,&
+!     &     pmfu,     pmfub,    kcbot,   ptu,&
+!     &     pqu,      plu,      puu,     pvu,    pmfus,&
+!     &     pmfuq,    pmful,    pdmfup)
+! ---------------------------------------------------------------------
+!$acc kernels
+         do jl=1,klon
+          if(.not.ldcum(jl) .and. klab(jl,ik+1).eq.0) then
+            if(lmfmid .and. pqen(jl,ik) .gt. 0.80*pqsen(jl,ik).and. &
+              pgeo(jl,ik)*zrg .gt. 5.0e2  .and.  &
+     &        pgeo(jl,ik)*zrg .lt. 1.0e4 )  then
+            ptu(jl,ik+1)=(cpd*pten(jl,ik)+pgeo(jl,ik)-pgeoh(jl,ik+1))&
+     &                          *rcpd
+            pqu(jl,ik+1)=pqen(jl,ik)
+            plu(jl,ik+1)=0.
+            zzzmb=max(cmfcmin,-pverv(jl,ik)*zrg)
+            zzzmb=min(zzzmb,cmfcmax)
+            pmfub(jl)=zzzmb
+            pmfu(jl,ik+1)=pmfub(jl)
+            pmfus(jl,ik+1)=pmfub(jl)*(cpd*ptu(jl,ik+1)+pgeoh(jl,ik+1))
+            pmfuq(jl,ik+1)=pmfub(jl)*pqu(jl,ik+1)
+            pmful(jl,ik+1)=0.
+            pdmfup(jl,ik+1)=0.
+            kcbot(jl)=ik
+            klab(jl,ik+1)=1
+            zlrain(jl,ik+1)=0.0
+            ktype(jl)=3
+          end if
+         end if
+        end do
+! ---------------------------------------------------------------------
+
       is = 0
       jlm = 0
+
+!$acc loop reduction(+:is, jlm)
       do jl = 1,klon
+        jlx(jl)=.false.
         loflag(jl) = .false.
         zprecip(jl) = 0.
         llo1(jl) = .false.
@@ -2300,7 +2782,7 @@ contains
              (ktype(jl) == 3 .and. klab(jl,jk+1) == 1) ) then
           loflag(jl) = .true.
           jlm = jlm + 1
-          jlx(jlm) = jl
+          jlx(jl) = .true.
         end if
         zph(jl) = paph(jl,jk)
         if ( ktype(jl) == 3 .and. jk == kcbot(jl) ) then
@@ -2315,24 +2797,57 @@ contains
           pmfub(jl)=min(pmfub(jl),zmfmax)
         end if
       end do
+!$acc end kernels
 
       if(is.gt.0) llo3 = .true.
-!
 !*     specify entrainment rates in *cuentr*
 ! -------------------------------------
-      ik=jk
-      call cuentrn(klon,klev,ik,kcbot,ldcum,llo3, &
-                  pgeoh,pmfu,zdmfen,zdmfde)
 !
+      ik=jk
+! ---------------------------------------------------------------------
+! function inlining cuentrn
+!       call cuentrn(klon,klev,ik,kcbot,ldcum,llo3, &
+!                    pgeoh,pmfu,zdmfen,zdmfde)
+! subroutine cuentrn(klon,klev,kk,kcbot,ldcum,ldwork, &
+!                    pgeoh,pmfu,pdmfen,pdmfde)
+! ---------------------------------------------------------------------
+    if ( llo3 ) then
+!$acc kernels
+      do jl = 1,klon
+        zdmfen(jl) = 0.
+        zdmfde(jl) = 0.
+        zentr(jl) = 0.
+      end do
+      !*  1.1 SPECIFY ENTRAINMENT RATES
+      !   -------------------------
+      !
+      do jl = 1, klon
+        if ( ldcum(jl) ) then
+          zdz = (pgeoh(jl,ik)-pgeoh(jl,ik+1))*zrg
+          zmf = pmfu(jl,ik+1)*zdz
+          llo1_in = ik < kcbot(jl)
+          if ( llo1_in ) then
+            zdmfen(jl) = zentr(jl)*zmf
+            zdmfde(jl) = 0.75e-4*zmf
+          end if
+        end if
+      end do
+!$acc end kernels
+    end if
+! ---------------------------------------------------------------------
+
 !      do adiabatic ascent for entraining/detraining plume
+!
       if(llo3) then
 ! -------------------------------------------------------
 !
+!$acc kernels
         do jl = 1,klon
           zqold(jl) = 0.
         end do
-        do jll = 1 , jlm
-          jl = jlx(jll)
+
+        do jl = 1 , klon
+          if(.not. jlx(jl)) cycle 
           zdmfde(jl) = min(zdmfde(jl),0.75*pmfu(jl,jk+1))
           if ( jk == kcbot(jl) ) then
             zoentr(jl) = -1.75e-3*(min(1.,pqen(jl,jk)/pqsen(jl,jk)) - &
@@ -2388,6 +2903,7 @@ contains
             zluold(jl) = plu(jl,jk)
           end if
         end do
+!$acc end kernels
 !*             do corrections for moist ascent
 !*             by adjusting t,q and l in *cuadjtq*
 !------------------------------------------------
@@ -2395,20 +2911,107 @@ contains
       icall=1
 !
       if ( jlm > 0 ) then
-        call cuadjtqn(klon,klev,ik,zph,ptu,pqu,loflag,icall)
+!-----------------------------------------------------------------------------------
+!   function inlining cuadjtqn
+!         call cuadjtqn(klon, klev, ik, zph,ptu,pqu, loflag,  icall)
+!   subroutine cuadjtqn(klon, klev, kk, psp, pt, pq, ldflag,  kcall)                           
+!-----------------------------------------------------------------------------------
+!$acc kernels
+!kimjy error loop
+      do jl = 1,klon
+        if ( loflag(jl) ) then
+          zqp = 1./zph(jl)
+          zl = 1./(ptu(jl,ik)-c4les)
+          zi = 1./(ptu(jl,ik)-c4ies)
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ptu(jl,ik)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+          zqsat = c2es*(foealfa_tt*exp(c3les*(ptu(jl,ik)-tmelt)*zl) + &
+                (1.-foealfa_tt)*exp(c3ies*(ptu(jl,ik)-tmelt)*zi))
+          zqsat = zqsat*zqp
+          zqsat = min(0.5,zqsat)
+          zcor = 1. - vtmpc1*zqsat
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ptu(jl,ik)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+!          zf = foealfa(ptu(jl,ik))*r5alvcp*zl**2 + &
+!               (1.-foealfa(ptu(jl,ik)))*r5alscp*zi**2
+          zf = foealfa_tt*r5alvcp*zl**2 + &
+               (1.-foealfa_tt)*r5alscp*zi**2
+          zcond = (pqu(jl,ik)*zcor**2-zqsat*zcor)/(zcor**2+zqsat*zf)
+          if ( zcond > 0. ) then
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+        input_tt = ptu(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foeldcpm_tt = foealfa_tt*ralvdcp+(1.-foealfa_tt)*ralsdcp
+!----------------------------------------------------------------------------------------
+            ptu(jl,ik) = ptu(jl,ik) + foeldcpm_tt*zcond
+            pqu(jl,ik) = pqu(jl,ik) - zcond
+            zl = 1./(ptu(jl,ik)-c4les)
+            zi = 1./(ptu(jl,ik)-c4ies)
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ptu(jl,ik)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+            zqsat = c2es*(foealfa_tt * &
+              exp(c3les*(ptu(jl,ik)-tmelt)*zl)+(1.-foealfa_tt) * &
+              exp(c3ies*(ptu(jl,ik)-tmelt)*zi))
+            zqsat = zqsat*zqp
+            zqsat = min(0.5,zqsat)
+            zcor = 1. - vtmpc1*zqsat
+            zf = foealfa_tt*r5alvcp*zl**2 + &
+                 (1.-foealfa_tt)*r5alscp*zi**2
+            zcond1 = (pqu(jl,ik)*zcor**2-zqsat*zcor)/(zcor**2+zqsat*zf)
+            if ( abs(zcond) < 1.e-20 ) zcond1 = 0.
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+        input_tt = ptu(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foeldcpm_tt = foealfa_tt*ralvdcp+(1.-foealfa_tt)*ralsdcp
+!----------------------------------------------------------------------------------------
+            ptu(jl,ik) = ptu(jl,ik) + foeldcpm_tt*zcond1
+            pqu(jl,ik) = pqu(jl,ik) - zcond1
+          end if
+        end if
+      end do
+!$acc end kernels
+!-----------------------------------------------------------------------------------
+
       end if
 ! compute the upfraft speed in cloud layer
-        do jll = 1 , jlm
-          jl = jlx(jll)
+!kimjy error loop
+!$acc kernels
+        do jl = 1 , klon
+          if(.not. jlx(jl)) cycle 
           if ( pqu(jl,jk) /= zqold(jl) ) then
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ptu(jl,jk)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+         input_tt = ptu(jl,jk+1)
+         foealfa_tt2 =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
             plglac(jl,jk) = plu(jl,jk) * &
-                           ((1.-foealfa(ptu(jl,jk)))- &
-                            (1.-foealfa(ptu(jl,jk+1))))
+                           ((1.-foealfa_tt)- &
+                            (1.-foealfa_tt2))
             ptu(jl,jk) = ptu(jl,jk) + ralfdcp*plglac(jl,jk)
           end if
         end do
-        do jll = 1 , jlm
-          jl = jlx(jll)
+!kimjy error loop
+        do jl = 1 , klon
+          if(.not. jlx(jl)) cycle 
           if ( pqu(jl,jk) /= zqold(jl) ) then
             klab(jl,jk) = 2
             plu(jl,jk) = plu(jl,jk) + zqold(jl) - pqu(jl,jk)
@@ -2493,7 +3096,7 @@ contains
             pmfude_rate(jl,jk) = zdmfde(jl)
           end if
         end do
-
+!kimjy error loop
         do jl = 1,klon
           if ( llo1(jl) ) then
 ! conversions only proceeds if plu is greater than a threshold liquid water
@@ -2533,12 +3136,19 @@ contains
             end if
           end if
         end do
+!kimjy error loop
         do jl = 1, klon
           if ( llo1(jl) ) then
             if ( zlrain(jl,jk) > 0. ) then
               zvw = 21.18*zlrain(jl,jk)**0.2
               zvi = z_cwifrac*zvw
-              zalfaw = foealfa(ptu(jl,jk))
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = ptu(jl,jk)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+              zalfaw = foealfa_tt
               zvv = zalfaw*zvw + (1.-zalfaw)*zvi
               zrold = zlrain(jl,jk) - zprecip(jl)
               zc = zprecip(jl)
@@ -2551,17 +3161,19 @@ contains
             end if
           end if
         end do
-        do jll = 1 , jlm
-          jl = jlx(jll)
+        do jl = 1 , klon
+          if(.not. jlx(jl)) cycle 
           pmful(jl,jk) = plu(jl,jk)*pmfu(jl,jk)
           pmfus(jl,jk) = (cpd*ptu(jl,jk)+pgeoh(jl,jk))*pmfu(jl,jk)
           pmfuq(jl,jk) = pqu(jl,jk)*pmfu(jl,jk)
         end do
+!$acc end kernels
       end if
     end do
 !----------------------------------------------------------------------
 ! 5.       final calculations
 ! ------------------
+!$acc kernels
       do jl = 1,klon
        if ( kctop(jl) == -1 ) ldcum(jl) = .false.
         kcbot(jl) = max(kcbot(jl),kctop(jl))
@@ -2570,13 +3182,15 @@ contains
           wup(jl) = sqrt(2.*wup(jl))
         end if
       end do
-
+!$acc end kernels
+!$acc end data
       return
       end subroutine cuascn
+
 !---------------------------------------------------------
 !  level 3 souroutines  
 !--------------------------------------------------------
-      subroutine cudlfsn   &                                                      
+       subroutine cudlfsn   &                                                      
      &    (klon,     klev,  &                       
      &     kcbot,    kctop,    lndj,   ldcum,   &                               
      &     ptenh,    pqenh,    puen,     pven,     &                              
@@ -2586,17 +3200,13 @@ contains
      &     ptd,      pqd,      pud,      pvd,            &                        
      &     pmfd,     pmfds,    pmfdq,    pdmfdp,          &                       
      &     kdtop,    lddraf)                                                     
-                                                                                 
 !          this routine calculates level of free sinking for                     
 !          cumulus downdrafts and specifies t,q,u and v values                   
-                                                                                 
 !          m.tiedtke         e.c.m.w.f.    12/86 modif. 12/89                    
-                                                                                 
 !          purpose.                                                              
 !          --------                                                              
 !          to produce lfs-values for cumulus downdrafts                          
 !          for massflux cumulus parameterization                                 
-                                                                                 
 !          interface                                                             
 !          ---------                                                             
 !          this routine is called from *cumastr*.                                
@@ -2604,28 +3214,20 @@ contains
 !          and updraft values t,q,u and v and also                               
 !          cloud base massflux and cu-precipitation rate.                        
 !          it returns t,q,u and v values and massflux at lfs.                    
-                                                                                 
 !          method.                                                               
-                                                                                 
 !          check for negative buoyancy of air of equal parts of                  
 !          moist environmental air and cloud air.                                
-                                                                                 
 !     parameter     description                                   units          
 !     ---------     -----------                                   -----          
 !     input parameters (integer):                                                
-                                                                                 
 !    *klon*         number of grid points per packet                             
 !    *klev*         number of levels                                             
 !    *kcbot*        cloud base level                                             
 !    *kctop*        cloud top level                                              
-                                                                                 
 !    input parameters (logical):                                                 
-                                                                                 
 !    *lndj*       land sea mask (1 for land)                              
 !    *ldcum*        flag: .true. for convective points                           
-                                                                                 
 !    input parameters (real):                                                    
-                                                                                 
 !    *ptenh*        env. temperature (t+1) on half levels          k             
 !    *pqenh*        env. spec. humidity (t+1) on half levels     kg/kg           
 !    *puen*         provisional environment u-velocity (t+1)      m/s            
@@ -2641,13 +3243,9 @@ contains
 !    *puu*          u-velocity in updrafts                        m/s            
 !    *pvu*          v-velocity in updrafts                        m/s            
 !    *pmfub*        massflux in updrafts at cloud base           kg/(m2*s)       
-                                                                                 
 !    updated parameters (real):                                                  
-                                                                                 
 !    *prfl*         precipitation rate                           kg/(m2*s)       
-                                                                                 
 !    output parameters (real):                                                   
-                                                                                 
 !    *ptd*          temperature in downdrafts                      k             
 !    *pqd*          spec. humidity in downdrafts                 kg/kg           
 !    *pud*          u-velocity in downdrafts                      m/s            
@@ -2656,15 +3254,10 @@ contains
 !    *pmfds*        flux of dry static energy in downdrafts       j/(m2*s)       
 !    *pmfdq*        flux of spec. humidity in downdrafts         kg/(m2*s)       
 !    *pdmfdp*       flux difference of precip. in downdrafts     kg/(m2*s)       
-                                                                                 
 !    output parameters (integer):                                                
-                                                                                 
 !    *kdtop*        top level of downdrafts                                      
-                                                                                 
 !    output parameters (logical):                                                
-                                                                                 
 !    *lddraf*       .true. if downdrafts exist                                   
-                                                                                 
 !          externals                                                             
 !          ---------                                                             
 !          *cuadjtq* for calculating wet bulb t and q at lfs                     
@@ -2700,78 +3293,169 @@ contains
       integer  jl,jk
       integer  is,ik,icall,ike
       real     zhsk,zttest,zqtest,zbuo,zmftop
-                                                                                   
+      real     zcond_in, zqp, zqsat, zcor, zcond1
+      real     input_tt, foealfa_tt, foeewm_tt, foedem_tt, foeldcpm_tt, foelhm_tt
 !----------------------------------------------------------------------          
-                                                                                 
 !     1.           set default values for downdrafts                             
 !                  ---------------------------------                             
+                
+!$acc data pcopy(ptenh, pqenh, puen, pven, pten, pqsen, pgeo, pgeoh, paph, ptu,   &
+!$acc            pqu, puu, pvu, plu, pmfub, prfl, ptd, pqd, pud, pvd, pmfd, pmfds,&
+!$acc            pmfdq, pdmfdp, kcbot, kctop, kdtop, ldcum, lddraf,lndj) &
+!$acc    pcreate(ikhsmin, ztenwb, zqenwb, zcond, zph, zhsmin, llo2)                                                           
+!$acc kernels                                                                                 
       do jl=1,klon                                                          
         lddraf(jl)=.false.                                                       
         kdtop(jl)=klev+1      
         ikhsmin(jl)=klev+1
         zhsmin(jl)=1.e8                                                  
-      enddo                                                                      
+      enddo  
+!$acc end kernels                                                                    
 !----------------------------------------------------------------------          
-                                                                                 
 !     2.           determine level of free sinking:                              
 !                  downdrafts shall start at model level of minimum              
 !                  of saturation moist static energy or below                    
 !                  respectively                                                  
-                                                                                 
 !                  for every point and proceed as follows:                       
-                                                                                 
 !                    (1) determine level of minimum of hs                        
 !                    (2) determine wet bulb environmental t and q                
 !                    (3) do mixing with cumulus cloud air                        
 !                    (4) check for negative buoyancy                             
 !                    (5) if buoyancy>0 repeat (2) to (4) for next                
 !                        level below                                             
-                                                                                 
 !                  the assumption is that air of downdrafts is mixture           
 !                  of 50% cloud air + 50% environmental air at wet bulb          
 !                  temperature (i.e. which became saturated due to               
 !                  evaporation of rain and cloud water)                          
 !                  ----------------------------------------------------          
+                                                                                 
+                                                                                 
+!$acc kernels                                                                                 
       do jk=3,klev-2
          do jl=1,klon
+!----------------------------------------------------------------------------------------
+!         function inlining foelhm
+!----------------------------------------------------------------------------------------
+        input_tt = pten(jl,jk)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foelhm_tt = foealfa_tt*alv + (1.-foealfa_tt)*als
+!----------------------------------------------------------------------------------------
            zhsk=cpd*pten(jl,jk)+pgeo(jl,jk) +  &
-     &         foelhm(pten(jl,jk))*pqsen(jl,jk)
+     &         foelhm_tt*pqsen(jl,jk)
            if(zhsk .lt. zhsmin(jl)) then
               zhsmin(jl) = zhsk
               ikhsmin(jl)= jk
            end if
          end do
       end do
+!$acc end kernels
 
-
-      ike=klev-3                                                                 
+      ike=klev-3     
+!$acc kernels                                                            
+!kimjy error loop
       do jk=3,ike                                                                
-                                                                                 
 !     2.1          calculate wet-bulb temperature and moisture                   
 !                  for environmental air in *cuadjtq*                            
 !                  -------------------------------------------                   
-        is=0                                                                     
+                                                                                 
+!        is=0                                                                     
         do jl=1,klon                                                        
           ztenwb(jl,jk)=ptenh(jl,jk)                                             
           zqenwb(jl,jk)=pqenh(jl,jk)                                             
           zph(jl)=paph(jl,jk)                                                    
           llo2(jl)=ldcum(jl).and.prfl(jl).gt.0..and..not.lddraf(jl).and.   &      
      &     (jk.lt.kcbot(jl).and.jk.gt.kctop(jl)).and. jk.ge.ikhsmin(jl)                            
-          if(llo2(jl))then                                                       
-            is=is+1                                                              
-          endif                                                                  
+!          if(llo2(jl))then                                                       
+!            is=is+1                                                              
+!          endif                                                                  
         enddo                                                                    
-        if(is.eq.0) cycle                                                        
+!        if(is.eq.0) cycle                                                        
                                                                                  
         ik=jk                                                                    
-        icall=2                                                                  
-        call cuadjtqn                                           &                  
-     &   ( klon, klev, ik, zph, ztenwb, zqenwb, llo2, icall)                        
-                                                                                 
+        icall=2                                                       
+!-----------------------------------------------------------------------------
+!  function inlining cuadjtqn           
+!        call cuadjtqn( klon, klev, ik, zph, ztenwb, zqenwb, llo2,    icall)     
+!  subroutine cuadjtqn( klon, klev, kk, psp, pt,     pq,     ldflag,  kcall)
+!-----------------------------------------------------------------------------
+      do jl = 1,klon
+        if ( llo2(jl) ) then
+          zqp = 1./zph(jl)
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+          input_tt = ztenwb(jl,ik)
+          foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+          foeewm_tt  = c2es *(foealfa_tt*exp(c3les*(input_tt-tmelt)/(input_tt-c4les))+ &
+                       (1.-foealfa_tt)*exp(c3ies*(input_tt-tmelt)/(input_tt-c4ies)))
+!----------------------------------------------------------------------------------------
+          !zqsat = foeewm(ztenwb(jl,ik))*zqp
+          zqsat = foeewm_tt*zqp
+          zqsat = min(0.5,zqsat)
+          zcor = 1./(1.-vtmpc1*zqsat)
+          zqsat = zqsat*zcor
+!----------------------------------------------------------------------------------------
+!         function inlining foedem
+!----------------------------------------------------------------------------------------
+        input_tt = ztenwb(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foedem_tt  =foealfa_tt*r5alvcp*(1./(input_tt-c4les)**2)+(1.-foealfa_tt)*r5alscp*(1./(input_tt-c4ies)**2)
+!----------------------------------------------------------------------------------------
+          !zcond_in = (zqenwb(jl,ik)-zqsat)/(1.+zqsat*zcor*foedem(ztenwb(jl,ik)))
+          zcond_in = (zqenwb(jl,ik)-zqsat)/(1.+zqsat*zcor*foedem_tt)
+          zcond_in = min(zcond_in,0.)
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+        input_tt = ztenwb(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foeldcpm_tt = foealfa_tt*ralvdcp+(1.-foealfa_tt)*ralsdcp
+!----------------------------------------------------------------------------------------
+          ztenwb(jl,ik) = ztenwb(jl,ik) + foeldcpm_tt*zcond_in
+          zqenwb(jl,ik) = zqenwb(jl,ik) - zcond_in
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+          input_tt = ztenwb(jl,ik)
+          foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+          foeewm_tt  = c2es *(foealfa_tt*exp(c3les*(input_tt-tmelt)/(input_tt-c4les))+ &
+                       (1.-foealfa_tt)*exp(c3ies*(input_tt-tmelt)/(input_tt-c4ies)))
+!----------------------------------------------------------------------------------------
+          !zqsat = foeewm(ztenwb(jl,ik))*zqp
+          zqsat = foeewm_tt*zqp
+          zqsat = min(0.5,zqsat)
+          zcor = 1./(1.-vtmpc1*zqsat)
+          zqsat = zqsat*zcor
+!----------------------------------------------------------------------------------------
+!         function inlining foedem
+!----------------------------------------------------------------------------------------
+        input_tt = ztenwb(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foedem_tt  =foealfa_tt*r5alvcp*(1./(input_tt-c4les)**2)+(1.-foealfa_tt)*r5alscp*(1./(input_tt-c4ies)**2)
+!----------------------------------------------------------------------------------------
+          !zcond1 = (zqenwb(jl,ik)-zqsat)/(1.+zqsat*zcor*foedem(ztenwb(jl,ik)))
+          zcond1 = (zqenwb(jl,ik)-zqsat)/(1.+zqsat*zcor*foedem_tt)
+          if ( abs(zcond_in) < 1.e-20 ) zcond1 = min(zcond1,0.)
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+        input_tt = ztenwb(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foeldcpm_tt = foealfa_tt*ralvdcp+(1.-foealfa_tt)*ralsdcp
+!----------------------------------------------------------------------------------------
+          ztenwb(jl,ik) = ztenwb(jl,ik) + foeldcpm_tt*zcond1
+          zqenwb(jl,ik) = zqenwb(jl,ik) - zcond1
+        end if
+      end do
+!-----------------------------------------------------------------------------
+
+
+                   
 !     2.2          do mixing of cumulus and environmental air                    
 !                  and check for negative buoyancy.                              
 !                  then set values for downdraft at lfs.                         
 !                  ----------------------------------------                      
+                                                                                 
         do jl=1,klon                                                        
           if(llo2(jl)) then                                                      
             zttest=0.5*(ptu(jl,jk)+ztenwb(jl,jk))                                
@@ -2794,8 +3478,9 @@ contains
           endif                                                                  
         enddo                                                                    
                                                                                  
-      enddo                                                                      
-                                                                                 
+      enddo  
+!$acc end kernels
+!$acc end data                                                                                 
       return                                                                     
       end subroutine cudlfsn  
 
@@ -2811,43 +3496,31 @@ contains
      &   , pgeo,     pgeoh,    paph,     prfl             &                
      &   , ptd,      pqd,      pud,      pvd,      pmfu   &                
      &   , pmfd,     pmfds,    pmfdq,    pdmfdp,   pmfdde_rate     )                          
-                                                                          
 !          this routine calculates cumulus downdraft descent              
-                                                                          
 !          m.tiedtke         e.c.m.w.f.    12/86 modif. 12/89             
-                                                                          
 !          purpose.                                                       
 !          --------                                                       
 !          to produce the vertical profiles for cumulus downdrafts        
 !          (i.e. t,q,u and v and fluxes)                                  
-                                                                          
 !          interface                                                      
 !          ---------                                                      
-                                                                          
 !          this routine is called from *cumastr*.                         
 !          input is t,q,p,phi,u,v at half levels.                         
 !          it returns fluxes of s,q and evaporation rate                  
 !          and u,v at levels where downdraft occurs                       
-                                                                          
 !          method.                                                        
 !          --------                                                       
 !          calculate moist descent for entraining/detraining plume by     
 !          a) moving air dry-adiabatically to next level below and        
 !          b) correcting for evaporation to obtain saturated state.       
-                                                                          
 !     parameter     description                                   units   
 !     ---------     -----------                                   -----   
 !     input parameters (integer):                                         
-                                                                          
 !    *klon*         number of grid points per packet                      
 !    *klev*         number of levels                                      
-                                                                          
 !    input parameters (logical):                                          
-                                                                          
 !    *lddraf*       .true. if downdrafts exist                            
-                                                                          
 !    input parameters (real):                                             
-                                                                          
 !    *ptenh*        env. temperature (t+1) on half levels          k      
 !    *pqenh*        env. spec. humidity (t+1) on half levels     kg/kg    
 !    *puen*         provisional environment u-velocity (t+1)      m/s     
@@ -2856,13 +3529,9 @@ contains
 !    *pgeoh*        geopotential on half levels                  m2/s2    
 !    *paph*         provisional pressure on half levels           pa      
 !    *pmfu*         massflux updrafts                           kg/(m2*s) 
-                                                                          
 !    updated parameters (real):                                           
-                                                                          
 !    *prfl*         precipitation rate                           kg/(m2*s)
-                                                                          
 !    output parameters (real):                                            
-                                                                          
 !    *ptd*          temperature in downdrafts                      k      
 !    *pqd*          spec. humidity in downdrafts                 kg/kg    
 !    *pud*          u-velocity in downdrafts                      m/s     
@@ -2871,7 +3540,6 @@ contains
 !    *pmfds*        flux of dry static energy in downdrafts       j/(m2*s)
 !    *pmfdq*        flux of spec. humidity in downdrafts         kg/(m2*s)
 !    *pdmfdp*       flux difference of precip. in downdrafts     kg/(m2*s)
-                                                                          
 !          externals                                                      
 !          ---------                                                      
 !          *cuadjtq* for adjusting t and q due to evaporation in          
@@ -2904,7 +3572,8 @@ contains
       integer  is,ik,icall,ike, itopde(klon)
       real     zentr,zdz,zzentr,zseen,zqeen,zsdde,zqdde,zdmfdp
       real     zmfdsk,zmfdqk,zbuo,zrain,zbuoyz,zmfduk,zmfdvk
-                                                                
+      real     zcond_in, zqp, zqsat, zcor, zcond1
+      real     input_tt, foealfa_tt, foeewm_tt, foedem_tt, foeldcpm_tt
 !----------------------------------------------------------------------   
 !     1.           calculate moist descent for cumulus downdraft by       
 !                     (a) calculating entrainment/detrainment rates,      
@@ -2916,6 +3585,10 @@ contains
 !                     (c) checking for negative buoyancy and              
 !                         specifying final t,q,u,v and downward fluxes    
 !                    -------------------------------------------------    
+!$acc data pcopy(ptenh, pqenh, puen, pven, pgeoh, paph, pgeo, pmfu, ptd, &
+!$acc            pqd, pud, pvd, pmfd, pmfds, pmfdq, pdmfdp, prfl, pmfdde_rate) &
+!$acc    pcreate(itopde, zdmfen, zdmfde, zcond, zoentr, zbuoy, lddraf, zph, llo2)              
+!$acc kernels                                                  
       do jl=1,klon                                                   
         zoentr(jl)=0.                                                     
         zbuoy(jl)=0.                                                      
@@ -2929,18 +3602,24 @@ contains
          if((paph(jl,klev+1)-paph(jl,jk)).lt. 60.e2) itopde(jl) = jk
        end do
       end do                                                              
-                                                                 
-      do jk=3,klev                                                        
-        is=0                                                              
+!$acc end kernels
+
+!kimjy loop error                                                                   
+      do jk=3,klev   
+!$acc kernels                                                     
+        is=0    
+!$acc loop gang vector  reduction(+:is)                                                          
         do jl=1,klon                                                 
           zph(jl)=paph(jl,jk)                                             
           llo2(jl)=lddraf(jl).and.pmfd(jl,jk-1).lt.0.                     
           if(llo2(jl)) then                                               
             is=is+1                                                       
           endif                                                           
-        enddo                                                             
+        enddo     
+!$acc end kernels                                                        
         if(is.eq.0) cycle                                                 
-                                                                          
+           
+!$acc kernels
         do jl=1,klon                                                 
           if(llo2(jl)) then    
             zentr = entrdd*pmfd(jl,jk-1)*(pgeoh(jl,jk-1)-pgeoh(jl,jk))*zrg
@@ -2994,8 +3673,83 @@ contains
                                                                           
         ik=jk                                                             
         icall=2                                                           
-        call cuadjtqn(klon, klev, ik, zph, ptd, pqd, llo2, icall )                
-                                                                          
+
+!----------------------------------------------------------------------------
+!        call cuadjtqn(klon, klev, ik, zph, ptd, pqd, llo2, icall )                
+!  subroutine cuadjtqn(klon, klev, kk, psp, pt, pq, ldflag,  kcall)                           
+!        cuadjtqn function inlining
+!----------------------------------------------------------------------------
+        do jl = 1,klon
+          if ( llo2(jl) ) then
+            zqp = 1./zph(jl)
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+          input_tt = ptd(jl,ik)
+          foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+          foeewm_tt  = c2es *(foealfa_tt*exp(c3les*(input_tt-tmelt)/(input_tt-c4les))+ &
+                       (1.-foealfa_tt)*exp(c3ies*(input_tt-tmelt)/(input_tt-c4ies)))
+!----------------------------------------------------------------------------------------
+            !zqsat = foeewm(ptd(jl,ik))*zqp
+            zqsat = foeewm_tt*zqp
+            zqsat = min(0.5,zqsat)
+            zcor = 1./(1.-vtmpc1*zqsat)
+            zqsat = zqsat*zcor
+!----------------------------------------------------------------------------------------
+!         function inlining foedem
+!----------------------------------------------------------------------------------------
+        input_tt = ptd(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foedem_tt  =foealfa_tt*r5alvcp*(1./(input_tt-c4les)**2)+(1.-foealfa_tt)*r5alscp*(1./(input_tt-c4ies)**2)
+!----------------------------------------------------------------------------------------
+            !zcond_in = (pqd(jl,ik)-zqsat)/(1.+zqsat*zcor*foedem(ptd(jl,ik)))
+            zcond_in = (pqd(jl,ik)-zqsat)/(1.+zqsat*zcor*foedem_tt)
+            zcond_in = min(zcond_in,0.)
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+        input_tt = ptd(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foeldcpm_tt = foealfa_tt*ralvdcp+(1.-foealfa_tt)*ralsdcp
+!----------------------------------------------------------------------------------------
+            ptd(jl,ik) = ptd(jl,ik) + foeldcpm_tt*zcond_in
+            pqd(jl,ik) = pqd(jl,ik) - zcond_in
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+          input_tt = ptd(jl,ik)
+          foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+          foeewm_tt  = c2es *(foealfa_tt*exp(c3les*(input_tt-tmelt)/(input_tt-c4les))+ &
+                       (1.-foealfa_tt)*exp(c3ies*(input_tt-tmelt)/(input_tt-c4ies)))
+!----------------------------------------------------------------------------------------
+            !zqsat = foeewm(ptd(jl,ik))*zqp
+            zqsat = foeewm_tt*zqp
+            zqsat = min(0.5,zqsat)
+            zcor = 1./(1.-vtmpc1*zqsat)
+            zqsat = zqsat*zcor
+!----------------------------------------------------------------------------------------
+!         function inlining foedem
+!----------------------------------------------------------------------------------------
+        input_tt = ptd(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foedem_tt  =foealfa_tt*r5alvcp*(1./(input_tt-c4les)**2)+(1.-foealfa_tt)*r5alscp*(1./(input_tt-c4ies)**2)
+!----------------------------------------------------------------------------------------
+            !zcond1 = (pqd(jl,ik)-zqsat)/(1.+zqsat*zcor*foedem(ptd(jl,ik)))
+            zcond1 = (pqd(jl,ik)-zqsat)/(1.+zqsat*zcor*foedem_tt)
+            if ( abs(zcond_in) < 1.e-20 ) zcond1 = min(zcond1,0.)
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+        input_tt = ptd(jl,ik)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foeldcpm_tt = foealfa_tt*ralvdcp+(1.-foealfa_tt)*ralsdcp
+!----------------------------------------------------------------------------------------
+            ptd(jl,ik) = ptd(jl,ik) + foeldcpm_tt*zcond1
+            pqd(jl,ik) = pqd(jl,ik) - zcond1
+          end if
+        end do
+                                                                 
+!----------------------------------------------------------------------------
         do jl=1,klon                                                 
           if(llo2(jl)) then                                               
             zcond(jl)=zcond(jl)-pqd(jl,jk)
@@ -3014,8 +3768,8 @@ contains
             zdmfdp=-pmfd(jl,jk)*zcond(jl)                                 
             pdmfdp(jl,jk-1)=zdmfdp                                        
             prfl(jl)=prfl(jl)+zdmfdp                                      
-                                                                          
 ! compute organized entrainment for use at next level                     
+                                                                          
             zbuoyz=zbuo/ptenh(jl,jk)                                      
             zbuoyz=min(zbuoyz,0.0)                                        
             zdz=-(pgeo(jl,jk-1)-pgeo(jl,jk))
@@ -3024,11 +3778,14 @@ contains
             pmfdde_rate(jl,jk) = -zdmfde(jl)
           endif                                                           
         enddo
+!$acc end kernels      
                                                              
-      enddo                                                               
+      enddo  
+!$acc end data                                                       
                                                                           
       return                                                              
       end subroutine cuddrafn
+
 !---------------------------------------------------------
 !  level 3 souroutines  
 !--------------------------------------------------------
@@ -3041,38 +3798,28 @@ contains
      &  ,  pmfu,     pmfd,     pmfus,    pmfds             &                    
      &  ,  pmfuq,    pmfdq,    pmful,    plude             &                    
      &  ,  pdmfup,   pdmfdp,   pdpmel,   plglac            &                    
-     &  ,  prain,    pmfdde_rate, pmflxr, pmflxs )                                         
-                                                                               
+     &  ,  prain,    pmfdde_rate, pmflxr, pmflxs ) 
+                                        
 !          m.tiedtke         e.c.m.w.f.     7/86 modif. 12/89                  
-                                                                               
 !          purpose                                                             
 !          -------                                                             
-                                                                               
 !          this routine does the final calculation of convective               
 !          fluxes in the cloud layer and in the subcloud layer                 
-                                                                               
 !          interface                                                           
 !          ---------                                                           
 !          this routine is called from *cumastr*.                              
-                                                                               
-                                                                               
 !     parameter     description                                   units        
 !     ---------     -----------                                   -----        
 !     input parameters (integer):                                              
-                                                                               
 !    *klon*         number of grid points per packet                           
 !    *klev*         number of levels                                           
 !    *kcbot*        cloud base level                                           
 !    *kctop*        cloud top level                                            
 !    *kdtop*        top level of downdrafts                                    
-                                                                               
 !    input parameters (logical):                                               
-                                                                               
 !    *lndj*       land sea mask (1 for land)                            
 !    *ldcum*        flag: .true. for convective points                         
-                                                                               
 !    input parameters (real):                                                  
-                                                                               
 !    *ptsphy*       time step for the physics                       s          
 !    *pten*         provisional environment temperature (t+1)       k          
 !    *pqen*         provisional environment spec. humidity (t+1)  kg/kg        
@@ -3082,17 +3829,11 @@ contains
 !    *paph*         provisional pressure on half levels            pa          
 !    *pap*          provisional pressure on full levels            pa          
 !    *pgeoh*        geopotential on half levels                   m2/s2        
-                                                                               
 !    updated parameters (integer):                                             
-                                                                               
 !    *ktype*        set to zero if ldcum=.false.                               
-                                                                               
 !    updated parameters (logical):                                             
-                                                                               
 !    *lddraf*       set to .false. if ldcum=.false. or kdtop<kctop             
-                                                                               
 !    updated parameters (real):                                                
-                                                                               
 !    *pmfu*         massflux in updrafts                          kg/(m2*s)    
 !    *pmfd*         massflux in downdrafts                        kg/(m2*s)    
 !    *pmfus*        flux of dry static energy in updrafts          j/(m2*s)    
@@ -3103,16 +3844,13 @@ contains
 !    *plude*        detrained liquid water                        kg/(m3*s)    
 !    *pdmfup*       flux difference of precip. in updrafts        kg/(m2*s)    
 !    *pdmfdp*       flux difference of precip. in downdrafts      kg/(m2*s)    
-                                                                               
 !    output parameters (real):                                                 
-                                                                               
 !    *pdpmel*       change in precip.-fluxes due to melting       kg/(m2*s)    
 !    *plglac*       flux of frozen cloud water in updrafts        kg/(m2*s)    
 !    *pmflxr*       convective rain flux                          kg/(m2*s)    
 !    *pmflxs*       convective snow flux                          kg/(m2*s)    
 !    *prain*        total precip. produced in conv. updrafts      kg/(m2*s)    
 !                   (no evaporation in downdrafts)                             
-                                                                               
 !          externals                                                           
 !          ---------                                                           
 !          none                                                                
@@ -3148,6 +3886,7 @@ contains
       real     rhevap(klon)
       integer  idbas(klon)
       logical  llddraf
+      real     input_tt, foealfa_tt, foeewm_tt, foelhm_tt
 !--------------------------------------------------------------------          
 !*             specify constants  
 
@@ -3156,9 +3895,14 @@ contains
       zcons2=3./(g*ztmst)
       zcucov=0.05
       zcpecons=5.44e-4/g
-
 !*    1.0          determine final convective fluxes                           
 !                  ---------------------------------                           
+!$acc data pcopy(pten, ptenh, pqen, pqsen, pqenh, pap, paph, pgeoh, plglac, &
+!$acc            pmfu, pmfd, pmfus, pmfds, pmfuq, pmfdq, pdmfup, pdmfdp, &
+!$acc            pdpmel, prain, pmful, plude, pmflxr, pmflxs, pmfdde_rate, &
+!$acc            kcbot, kctop, kdtop, ktype, lddraf, ldcum, lndj) &
+!$acc    pcreate(rhevap, idbas)
+!$acc kernels
       do jl=1,klon
         prain(jl)=0.
         if(.not.ldcum(jl).or.kdtop(jl).lt.kctop(jl)) lddraf(jl)=.false.
@@ -3170,10 +3914,10 @@ contains
           rhevap(jl) = 0.9
         end if
       enddo
-
       ktopm2= 2
       do jk=ktopm2,klev
         ikb = min(jk+1,klev)
+!$acc loop gang vector
         do jl=1,klon
           pmflxr(jl,jk) = 0.
           pmflxs(jl,jk) = 0.
@@ -3214,10 +3958,12 @@ contains
         enddo
       enddo
 
+!$acc loop gang vector
       do jl=1,klon
         pmflxr(jl,klev+1) = 0.
         pmflxs(jl,klev+1) = 0.
       end do
+!$acc loop gang vector
       do jl=1,klon
         if(ldcum(jl)) then
           ikb=kcbot(jl)
@@ -3228,14 +3974,22 @@ contains
             zzp=zzp**2
           endif
           pmfu(jl,ik)=pmfu(jl,ikb)*zzp
+!----------------------------------------------------------------------------------------
+!         function inlining foelhm
+!----------------------------------------------------------------------------------------
+        input_tt = ptenh(jl,ikb)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foelhm_tt = foealfa_tt*alv + (1.-foealfa_tt)*als
+!----------------------------------------------------------------------------------------
           pmfus(jl,ik)=(pmfus(jl,ikb)-                         &
-     &         foelhm(ptenh(jl,ikb))*pmful(jl,ikb))*zzp
+     &         foelhm_tt*pmful(jl,ikb))*zzp
           pmfuq(jl,ik)=(pmfuq(jl,ikb)+pmful(jl,ikb))*zzp
           pmful(jl,ik)=0.
         endif
       enddo
-
+!$acc loop seq
       do jk=ktopm2,klev
+!$acc loop gang vector
         do jl=1,klon
           if(ldcum(jl).and.jk.gt.kcbot(jl)+1) then
             ikb=kcbot(jl)+1
@@ -3263,12 +4017,14 @@ contains
            end if
         enddo
       enddo
+!$acc end kernels
 !*    2.            calculate rain/snow fall rates                             
 !*                  calculate melting of snow                                  
 !*                  calculate evaporation of precip                            
 !                   -------------------------------                            
-
-        do jk=ktopm2,klev
+!kimjy error loop
+!$acc kernels
+      do jk=ktopm2,klev
         do jl=1,klon
           if(ldcum(jl) .and. jk >=kctop(jl)-1 ) then
             prain(jl)=prain(jl)+pdmfup(jl,jk)
@@ -3277,11 +4033,26 @@ contains
               zfac=zcons1*(paph(jl,jk+1)-paph(jl,jk))
               zsnmlt=min(pmflxs(jl,jk),zfac*(pten(jl,jk)-tmelt))
               pdpmel(jl,jk)=zsnmlt
-              pqsen(jl,jk)=foeewm(pten(jl,jk)-zsnmlt/zfac)/pap(jl,jk)
+!----------------------------------------------------------------------------------------
+!         function inlining foeewm
+!----------------------------------------------------------------------------------------
+          input_tt = (pten(jl,jk)-zsnmlt/zfac)
+          foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+          foeewm_tt  = c2es *(foealfa_tt*exp(c3les*(input_tt-tmelt)/(input_tt-c4les))+ &
+                       (1.-foealfa_tt)*exp(c3ies*(input_tt-tmelt)/(input_tt-c4ies)))
+!----------------------------------------------------------------------------------------
+              !pqsen(jl,jk)=foeewm(pten(jl,jk)-zsnmlt/zfac)/pap(jl,jk)
+              pqsen(jl,jk)=foeewm_tt/pap(jl,jk)
             endif
-            zalfaw=foealfa(pten(jl,jk))
-          !
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = pten(jl,jk)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+            zalfaw=foealfa_tt
           ! No liquid precipitation above melting level
+          !
           !
             if ( pten(jl,jk) < tmelt .and. zalfaw > 0. ) then
               plglac(jl,jk) = plglac(jl,jk)+zalfaw*(pdmfup(jl,jk)+pdmfdp(jl,jk))
@@ -3306,6 +4077,7 @@ contains
           endif
         enddo
       enddo
+!kimjy error loop
       do jk=ktopm2,klev
         do jl=1,klon
           if(ldcum(jl).and.jk.ge.kcbot(jl)) then
@@ -3322,7 +4094,13 @@ contains
               zrfln=max(zrnew,0.)
               zdrfl=min(0.,zrfln-zrfl)
               zdenom=1./max(1.e-20,pmflxr(jl,jk)+pmflxs(jl,jk))
-              zalfaw=foealfa(pten(jl,jk))
+!-------------------------------------------------------------------------------------
+!     function inling foealfa
+!-------------------------------------------------------------------------------------
+         input_tt = pten(jl,jk)
+         foealfa_tt =min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+!-------------------------------------------------------------------------------------
+              zalfaw=foealfa_tt
               if ( pten(jl,jk) < tmelt ) zalfaw = 0.
               zpdr=zalfaw*pdmfdp(jl,jk)
               zpds=(1.-zalfaw)*pdmfdp(jl,jk)
@@ -3352,13 +4130,14 @@ contains
           endif
         enddo
       enddo
-                                      
+!$acc end kernels
+!$acc end data
       return
       end subroutine cuflxn 
 !---------------------------------------------------------
 !  level 3 souroutines  
 !--------------------------------------------------------
-     subroutine cudtdqn(klon,klev,ktopm2,kctop,kdtop,ldcum, &
+      subroutine cudtdqn(klon,klev,ktopm2,kctop,kdtop,ldcum, &
                      lddraf,ztmst,paph,pgeoh,pgeo,pten,ptenh,pqen,  &
                      pqenh,pqsen,plglac,plude,pmfu,pmfd,pmfus,pmfds, &
                      pmfuq,pmfdq,pmful,pdmfup,pdmfdp,pdpmel,ptent,ptenq,pcte)
@@ -3379,15 +4158,21 @@ contains
              pdpmel(klon,klev), pdmfdp(klon,klev)
     real     ptent(klon,klev),  ptenq(klon,klev)
     real     pcte(klon,klev)
-
 ! local variables
+
     integer  jk , ik , jl
     real     zalv , zzp
     real     zmfus(klon,klev) , zmfuq(klon,klev) 
     real     zmfds(klon,klev) , zmfdq(klon,klev)
     real     zdtdt(klon,klev) , zdqdt(klon,klev) , zdp(klon,klev)
+    real     foealfa_tt, foelhm_tt, input_tt
     !*    1.0          SETUP AND INITIALIZATIONS
     ! -------------------------
+!$acc data pcopy(kctop, kdtop, ldcum, lddraf, paph, pgeoh, pgeo, pten, ptenh, &
+!$acc            pqen, pqenh, pqsen, plglac, plude, pmfu, pmfd, pmfus, pmfds, &
+!$acc            pmfuq, pmfdq, pmful, pdmfup, pdmfdp, pdpmel, ptent, ptenq, pcte) &
+!$acc    pcreate(zmfus, zmfuq, zmfds, zmfdq, zdtdt, zdqdt, zdp)
+!$acc kernels
     do jk = 1 , klev
       do jl = 1, klon
         if ( ldcum(jl) ) then
@@ -3399,14 +4184,25 @@ contains
         end if
       end do
     end do
+!!$acc end kernels
     !-----------------------------------------------------------------------
     !*    2.0          COMPUTE TENDENCIES
     ! ------------------
+!!$acc kernels
     do jk = ktopm2 , klev
       if ( jk < klev ) then
         do jl = 1,klon
           if ( ldcum(jl) ) then
-            zalv = foelhm(pten(jl,jk))
+            !foealfa_tt = min(1.,((max(rtice,min(rtwat,pten(jl,jk)))-rtice)/(rtwat-rtice))**2)
+            !foelhm_tt = foealfa_tt*alv + (1.-foealfa_tt)*als
+!----------------------------------------------------------------------------------------
+!         function inlining foelhm
+!----------------------------------------------------------------------------------------
+        input_tt = pten(jl,jk)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foelhm_tt = foealfa_tt*alv + (1.-foealfa_tt)*als
+!----------------------------------------------------------------------------------------
+            zalv = foelhm_tt
             zdtdt(jl,jk) = zdp(jl,jk)*rcpd * &
               (zmfus(jl,jk+1)-zmfus(jl,jk)+zmfds(jl,jk+1) - &
                zmfds(jl,jk)+alf*plglac(jl,jk)-alf*pdpmel(jl,jk) - &
@@ -3419,7 +4215,16 @@ contains
       else
         do jl = 1,klon
           if ( ldcum(jl) ) then
-            zalv = foelhm(pten(jl,jk))
+            !foealfa_tt = min(1.,((max(rtice,min(rtwat,pten(jl,jk)))-rtice)/(rtwat-rtice))**2)
+            !foelhm_tt = foealfa_tt*alv + (1.-foealfa_tt)*als
+!----------------------------------------------------------------------------------------
+!         function inlining foelhm
+!----------------------------------------------------------------------------------------
+        input_tt = pten(jl,jk)
+        foealfa_tt = min(1.,((max(rtice,min(rtwat,input_tt))-rtice)/(rtwat-rtice))**2)
+        foelhm_tt = foealfa_tt*alv + (1.-foealfa_tt)*als
+!----------------------------------------------------------------------------------------
+            zalv = foelhm_tt
             zdtdt(jl,jk) = -zdp(jl,jk)*rcpd * &
               (zmfus(jl,jk)+zmfds(jl,jk)+alf*pdpmel(jl,jk) - &
                zalv*(pmful(jl,jk)+pdmfup(jl,jk)+pdmfdp(jl,jk)))
@@ -3441,7 +4246,8 @@ contains
        end if
      end do
     end do
-
+!$acc end kernels
+!$acc end data
     return
   end subroutine cudtdqn
 !---------------------------------------------------------
@@ -3461,8 +4267,8 @@ contains
              puu(klon,klev),   pud(klon,klev),&
              pvu(klon,klev),   pvd(klon,klev)
     real     ptenu(klon,klev), ptenv(klon,klev)
-
 !local variables
+
     real     zuen(klon,klev) , zven(klon,klev) , zmfuu(klon,klev), &
              zmfdu(klon,klev), zmfuv(klon,klev), zmfdv(klon,klev)
 
@@ -3471,6 +4277,11 @@ contains
    
     real     zdudt(klon,klev), zdvdt(klon,klev), zdp(klon,klev)
 !
+!$acc data pcopy(ktype, kcbot, kctop, ldcum, paph, puen, pven, pmfu, &
+!$acc            pmfd, puu, pud, pvu, pvd, ptenu, ptenv) &
+!$acc    pcreate(zuen, zven, zmfuu, zmfdu, zmfuv, zmfdv, zdudt, &
+!$acc            zdvdt, zdp)
+!$acc kernels
     do jk = 1 , klev
       do jl = 1, klon
         if ( ldcum(jl) ) then
@@ -3495,7 +4306,9 @@ contains
       end do
     end do
     ! linear fluxes below cloud
+!$acc loop independent
       do jk = ktopm2 , klev
+!$acc loop independent
         do jl = 1, klon
           if ( ldcum(jl) .and. jk > kcbot(jl) ) then
             ikb = kcbot(jl)
@@ -3511,9 +4324,11 @@ contains
 !----------------------------------------------------------------------
 !*    2.0          COMPUTE TENDENCIES
 ! ------------------
+!$acc loop gang vector(4)
     do jk = ktopm2 , klev
       if ( jk < klev ) then
         ik = jk + 1
+!$acc loop gang vector(32)
         do jl = 1,klon
           if ( ldcum(jl) ) then
             zdudt(jl,jk) = zdp(jl,jk) * &
@@ -3523,6 +4338,7 @@ contains
           end if
         end do
       else
+!$acc loop gang vector(32)
         do jl = 1,klon
           if ( ldcum(jl) ) then
             zdudt(jl,jk) = -zdp(jl,jk)*(zmfuu(jl,jk)+zmfdu(jl,jk))
@@ -3542,6 +4358,8 @@ contains
         end if
       end do
     end do
+!$acc end kernels
+!$acc end data
 !----------------------------------------------------------------------
     return
     end subroutine cududvn
