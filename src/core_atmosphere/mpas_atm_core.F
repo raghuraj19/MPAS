@@ -485,6 +485,7 @@ end if
    
    function atm_core_run(domain) result(ierr)
    
+      use mpi
       use mpas_timekeeping
       use mpas_kind_types
       use mpas_stream_manager
@@ -582,6 +583,9 @@ end if
       call mpas_pool_get_subpool(block_ptr % structs, 'state', state)
       call mpas_pool_get_subpool(block_ptr % structs, 'diag', diag)
       call mpas_pool_get_subpool(block_ptr % structs, 'diag_physics', diag_physics)
+
+      call mpi_barrier(mpi_comm_world, ierr)
+      call mpi_pcontrol(1)
 
       ! During integration, time level 1 stores the model state at the beginning of the
       !   time step, and time level 2 stores the state advanced dt in time by timestep(...)
@@ -733,7 +737,9 @@ end if
          call mpas_pool_get_subpool(block_ptr % structs, 'diag_physics', diag_physics)
 
       end do
-   
+  
+      call mpi_pcontrol(0)
+ 
    end function atm_core_run
    
    subroutine atm_compute_output_diagnostics(state, time_lev, diag, mesh)

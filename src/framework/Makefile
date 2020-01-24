@@ -6,6 +6,7 @@ TYPE_DEPS := $(shell find . -type f -name "*_types.inc")
 OBJS = mpas_kind_types.o \
        mpas_framework.o \
        mpas_timer.o \
+       mpas_device_utilities.o \
        mpas_timekeeping.o \
        mpas_constants.o \
        mpas_attlist.o \
@@ -58,6 +59,8 @@ mpas_framework.o: mpas_dmpar.o \
                   mpas_c_interfacing.o
 
 mpas_abort.o: mpas_kind_types.o mpas_io_units.o mpas_threading.o
+
+mpas_device_utilities.o: mpas_abort.o
 
 mpas_constants.o: mpas_kind_types.o
 
@@ -112,7 +115,7 @@ xml_stream_parser.o: xml_stream_parser.c
 
 mpas_field_accessor.o: mpas_derived_types.o mpas_kind_types.o mpas_pool_routines.o mpas_log.o
 
-mpas_intracoupler.o: mpas_derived_types.o mpas_dmpar.o mpas_field_routines.o
+mpas_intracoupler.o: mpas_derived_types.o mpas_dmpar.o mpas_field_routines.o mpas_device_utilities.o
 
 clean:
 	$(RM) *.o *.mod *.f90 libframework.a

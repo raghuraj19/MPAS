@@ -46,7 +46,7 @@ utilities: physcore
 atmcore: physcore dycore diagcore $(OBJS)
 	ar -ru libdycore.a $(OBJS) dynamics/*.o libphys/*.o diagnostics/*.o
 
-mpas_atm_core_interface.o: mpas_atm_core.o
+mpas_atm_core_interface.o: mpas_atm_core.o ../framework/mpas_device_utilities.o
 
 mpas_atm_core.o: dycore diagcore mpas_atm_threading.o
 

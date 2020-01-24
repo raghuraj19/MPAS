@@ -53,6 +53,8 @@ contains
 #endif
 #endif
 
+        use mpas_device_utilities
+
         implicit none
 
         type (core_type), intent(in) :: core
@@ -76,6 +78,7 @@ contains
             intercomm = MPI_COMM_WORLD
             cpl % initialized_mpi = .true.
             call MPI_Init(ierr)
+            call set_devices_and_roles()
         end if
 
         call MPI_Comm_rank(intercomm, comm_rank, ierr)
